@@ -1,0 +1,1053 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<link rel="icon" href="data:,">
+<!-- If you self-host ntfy, change the host in connect-src AND NTFY_SERVER below. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Secret Room Chat</title>
+<style>
+/* One narrow night-sky column. The lock screen and the chat share it, so unlocking changes the content only.
+   System fonts only: no web fonts, no external requests. */
+:root {
+  --sky-0: #0a0f1f; --sky-1: #111a33; --line: #2b3868; --ink: #e9edff; --ink-dim: #a4aed8;
+  --moon: #f3d9a4; --moon-ink: #1b1630; --sent: #33428f; --recv: #1d2850;
+  --ok: #8fe3b0; --warn: #ffb8a6; --bad: #ff9aa8;
+  --font-display: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans Arabic", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html { height: 100%; box-sizing: border-box; }
+*, *::before, *::after { box-sizing: inherit; }
+body {
+  height: 100%; margin: 0;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  background-color: var(--sky-0);
+  background-image:
+    radial-gradient(circle at 12% 14%, rgba(233,237,255,.75) 0, rgba(233,237,255,0) 1.6px),
+    radial-gradient(circle at 27% 7%, rgba(233,237,255,.55) 0, rgba(233,237,255,0) 1.2px),
+    radial-gradient(circle at 41% 21%, rgba(233,237,255,.7) 0, rgba(233,237,255,0) 1.5px),
+    radial-gradient(circle at 58% 9%, rgba(233,237,255,.5) 0, rgba(233,237,255,0) 1.2px),
+    radial-gradient(circle at 73% 17%, rgba(233,237,255,.7) 0, rgba(233,237,255,0) 1.6px),
+    radial-gradient(circle at 91% 30%, rgba(233,237,255,.55) 0, rgba(233,237,255,0) 1.3px),
+    radial-gradient(circle at 8% 46%, rgba(233,237,255,.5) 0, rgba(233,237,255,0) 1.2px),
+    radial-gradient(circle at 95% 62%, rgba(233,237,255,.45) 0, rgba(233,237,255,0) 1.2px),
+    radial-gradient(circle at 18% 83%, rgba(233,237,255,.5) 0, rgba(233,237,255,0) 1.3px),
+    radial-gradient(ellipse 55% 38% at 88% -6%, rgba(243,217,164,.16), rgba(243,217,164,0) 70%),
+    linear-gradient(180deg, var(--sky-1), var(--sky-0) 72%);
+  background-attachment: fixed;
+  color: var(--ink); font: 15px/1.5 var(--font-body);
+}
+.app { height: var(--vvh, 100%); max-width: 620px; margin: 0 auto; display: flex; flex-direction: column; padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--moon); outline-offset: 2px; }
+
+/* lock screen */
+.lock { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-block: 8px 20px; }
+.lock h1 { margin: 12px 0 0; font: italic 400 clamp(2rem, 9vw, 2.8rem)/1.1 var(--font-display); color: var(--moon); text-wrap: balance; }
+.lede { margin: 0; color: var(--ink-dim); max-width: 48ch; }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field label, .lbl { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-dim); }
+.pw-row { display: flex; gap: 8px; }
+.input { min-width: 0; width: 100%; padding: 13px 16px; font-size: 16px; background: rgba(8,12,28,.65); border: 1.5px solid var(--line); border-radius: 12px; }
+.input::placeholder { color: #8d99cb; }
+.input:focus { border-color: var(--moon); outline: none; box-shadow: 0 0 0 3px rgba(243,217,164,.25); }
+select.input { padding: 11px 14px; }
+.ghost { flex: none; padding: 0 14px; min-height: 44px; background: transparent; border: 1.5px solid var(--line); border-radius: 12px; color: var(--ink-dim); cursor: pointer; }
+.ghost:hover { border-color: var(--ink-dim); color: var(--ink); }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; color: var(--ink-dim); }
+.check input { margin-top: 4px; accent-color: var(--moon); }
+.hint { margin: 0; min-height: 2.9em; font-size: 14px; color: var(--ink-dim); }
+.hint[data-level="weak"] { color: var(--warn); }
+.hint[data-level="ok"] { color: var(--ok); }
+.primary { width: 100%; min-height: 50px; padding: 12px 18px; border: 0; border-radius: 12px; cursor: pointer; background: var(--moon); color: var(--moon-ink); font-weight: 650; font-size: 16px; }
+.primary:hover:not(:disabled) { filter: brightness(1.06); }
+.primary:disabled { opacity: .6; cursor: progress; }
+.status { margin: 0; min-height: 1.5em; font-size: 14px; color: var(--ink-dim); }
+.status[data-kind="warn"] { color: var(--warn); }
+.status[data-kind="bad"] { color: var(--bad); }
+.limits { border-top: 1px solid var(--line); padding-top: 14px; font-size: 14px; color: var(--ink-dim); }
+.limits summary { cursor: pointer; color: var(--ink); font-weight: 600; }
+.limits h2 { margin: 14px 0 4px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--moon); }
+.limits ul { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 3px; }
+
+/* chat */
+.chat { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.who { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; color: var(--ink-dim); }
+.dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #5b6694; }
+.dot[data-state="on"] { background: var(--ok); box-shadow: 0 0 8px rgba(143,227,176,.7); }
+.dot[data-state="bad"] { background: var(--bad); }
+.lockbtn { min-height: 40px; padding: 0 16px; background: transparent; border: 1.5px solid var(--warn); border-radius: 10px; color: var(--warn); cursor: pointer; }
+.lockbtn:hover { background: rgba(255,184,166,.1); }
+.tag { margin: 0; font-size: 12.5px; color: var(--ink-dim); }
+.notice { margin: 0; padding: 9px 12px; font-size: 14px; border-radius: 10px; background: rgba(255,154,168,.12); color: var(--bad); border: 1px solid rgba(255,154,168,.4); }
+.manual { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(17,26,51,.7); font-size: 14px; }
+.manual p { margin: 0; color: var(--ink-dim); }
+.manual textarea { resize: vertical; min-height: 84px; font: 12px/1.3 var(--font-mono); word-break: break-all; }
+.mrow { display: flex; gap: 8px; flex-wrap: wrap; }
+.log { flex: 1; min-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: rgba(17,26,51,.7); border: 1px solid var(--line); border-radius: 16px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.empty { margin: auto; text-align: center; color: var(--ink-dim); font: italic 16px/1.4 var(--font-display); max-width: 28ch; }
+.msg { max-width: 84%; padding: 9px 13px; border-radius: 16px; overflow-wrap: anywhere; transition: opacity .45s linear; animation: rise .25s ease-out; }
+.msg.sent { align-self: flex-end; background: var(--sent); border-bottom-right-radius: 5px; }
+.msg.recv { align-self: flex-start; background: var(--recv); border: 1px solid var(--line); border-bottom-left-radius: 5px; }
+.txt { white-space: pre-wrap; }
+.meta { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; font: 12px/1.2 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+.sent .meta { color: rgba(255,255,255,.82); }
+.msg.fading .left { color: var(--moon); }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.composer { display: flex; flex-direction: column; gap: 8px; }
+.opts { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-dim); }
+.opts select { padding: 6px 10px; background: rgba(8,12,28,.65); border: 1.5px solid var(--line); border-radius: 8px; }
+.send-row { display: flex; gap: 8px; }
+.send { flex: none; width: 50px; min-height: 50px; border: 0; border-radius: 12px; background: var(--moon); color: var(--moon-ink); font-size: 20px; cursor: pointer; }
+.send:hover { filter: brightness(1.06); }
+.foot { margin: 0; font-size: 12px; color: var(--ink-dim); }
+@media (prefers-reduced-motion: reduce) { .msg { animation: none; transition: none; } }
+@media (max-width: 400px) { .msg { max-width: 92%; } }
+@media (max-height: 520px) {
+  .foot, .tag { display: none; }
+  .log { min-height: 60px; padding: 10px; }
+  .app { padding-block: 6px; }
+  .chat { gap: 6px; }
+}
+</style>
+</head>
+<body>
+<main class="app" id="app">
+  <section class="lock" id="lock" aria-labelledby="title">
+    <h1 id="title">Secret Room</h1>
+    <p class="lede">Two people, one shared password. Messages are encrypted in your browser, travel directly between the two of you, and vanish after the time you pick, up to 75 seconds.</p>
+
+    <form id="joinForm" class="field" autocomplete="off" novalidate>
+      <label for="pw">Shared password</label>
+      <div class="pw-row">
+        <input class="input" id="pw" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Four or more random words" aria-describedby="pwHint joinStatus">
+        <button class="ghost" id="pwToggle" type="button" aria-pressed="false" aria-label="Show password">Show</button>
+      </div>
+      <p class="hint" id="pwHint" aria-live="polite"></p>
+
+      <label for="route">Connection</label>
+      <select class="input" id="route">
+        <option value="auto" selected>Automatic: direct, with encrypted relay as backup (recommended)</option>
+        <option value="p2p">Direct only, found through the ntfy relay</option>
+        <option value="relay">Encrypted relay only (works on any network)</option>
+        <option value="manual">Manual codes, no server at all</option>
+      </select>
+      <label class="check" for="useStun">
+        <input type="checkbox" id="useStun" checked>
+        <span>Use a STUN server so direct connections work across the internet. Untick for same-network only; the STUN operator then never sees your IP address.</span>
+      </label>
+
+      <button class="primary" id="joinBtn" type="submit">Join room</button>
+      <p class="status" id="joinStatus" role="status" aria-live="polite"></p>
+    </form>
+
+    <details class="limits" open>
+      <summary>What this protects, and what it doesn't</summary>
+      <h2>Protects against</h2>
+      <ul>
+        <li>Someone opening this page without the password.</li>
+        <li>The relay and STUN operators reading what you write: they only ever see encrypted setup data.</li>
+        <li>Anyone impersonating the other person without the password, because the connection fingerprint is sealed with it.</li>
+      </ul>
+      <h2>Does not protect against</h2>
+      <ul>
+        <li>Metadata. The relay sees that a room is being joined, and when. STUN sees your IP address.</li>
+        <li>Your two IP addresses are visible to each other in a direct connection.</li>
+        <li>A weak or guessable password. It can be cracked offline.</li>
+        <li>Screenshots, or a camera pointed at the screen.</li>
+        <li>Spyware on either device. The key sits in memory while the page is open.</li>
+        <li>Whoever controls the website host changing the code. Verify or self-host the page.</li>
+        <li>Relay fallback. When a direct link is impossible (strict firewalls), Automatic sends the same sealed messages through the relay instead. Content stays unreadable, but the relay then sees every message's timing and size, and public relays may rate-limit free use.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section class="chat" id="chat" hidden aria-label="Chat room">
+    <div class="bar">
+      <div class="who"><span class="dot" id="dot" aria-hidden="true"></span><span id="presence" role="status" aria-live="polite">Waiting for the other person</span></div>
+      <button class="lockbtn" id="lockBtn" type="button" aria-label="Lock room and clear keys and messages">Lock</button>
+    </div>
+    <p class="tag" id="modeTag"></p>
+    <p class="notice" id="notice" role="alert" hidden></p>
+
+    <div class="manual" id="manual" hidden>
+      <p><strong>Manual pairing.</strong> One person presses "Create invite" and sends the code over any channel. The other pastes it here, presses "Use pasted code", and sends back the reply code. Then the first person pastes that reply and presses the same button. Codes are encrypted with your password and expire after 10 minutes.</p>
+      <textarea class="input" id="mBox" rows="4" spellcheck="false" aria-label="Invite or reply code" placeholder="Codes appear here. Paste the other person's code here."></textarea>
+      <div class="mrow">
+        <button class="ghost" id="mkInvite" type="button">Create invite</button>
+        <button class="ghost" id="mUse" type="button">Use pasted code</button>
+        <button class="ghost" id="mCopy" type="button">Copy</button>
+      </div>
+      <p class="status" id="mStatus" role="status" aria-live="polite"></p>
+    </div>
+
+    <div class="log" id="log" role="log" aria-label="Messages">
+      <p class="empty" id="empty">Quiet in here. Messages vanish on their own.</p>
+    </div>
+    <form class="composer" id="composer" autocomplete="off">
+      <div class="opts">
+        <label for="ttl">Vanishes after</label>
+        <select id="ttl">
+          <option value="30">30 seconds</option>
+          <option value="45">45 seconds</option>
+          <option value="60" selected>60 seconds</option>
+          <option value="75">75 seconds</option>
+        </select>
+      </div>
+      <div class="send-row">
+        <input class="input" id="msgInput" type="text" dir="auto" maxlength="1000" autocomplete="off" aria-label="Message" placeholder="Write a message">
+        <button class="send" id="sendBtn" type="submit" aria-label="Send message">&#10148;</button>
+      </div>
+    </form>
+    <p class="foot">Screenshots, spyware and weak passwords are not covered. Timing and message size are visible on the network.</p>
+  </section>
+</main>
+
+<script>
+'use strict';
+/* CORE-BEGIN */
+/* ===== Core: pure logic. No DOM, no transport, no globals except the Web Crypto API. ===== */
+
+const PBKDF2_ITERATIONS = 600000;
+const APP_SALT = 'secret-room-chat/v2';
+const DEFAULT_TTL = 60;
+const MIN_TTL = 5;
+const MAX_TTL = 75;
+const FADE_SEC = 5;
+const MAX_AGE_SEC = 75;       // reject anything older than this after decryption (replay defence)
+const DRIFT_SEC = 15;         // tolerated clock difference between the two devices
+const HEARTBEAT_MAX_AGE_SEC = 30;
+const MAX_ENVELOPE_BYTES = 4000;
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+function viewBytes(x) {
+  return ArrayBuffer.isView(x) ? new Uint8Array(x.buffer, x.byteOffset, x.byteLength) : new Uint8Array(x);
+}
+function toB64(x) {
+  const b = viewBytes(x);
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s);
+}
+function fromB64(str) {
+  const s = atob(str);
+  const b = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+  return b;
+}
+function toHex(b) {
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, '0');
+  return s;
+}
+function newId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return toHex(crypto.getRandomValues(new Uint8Array(16)));
+}
+
+/*
+ * Key derivation:
+ *   password' = NFKC(password).trim()
+ *   salt      = SHA-256( APP_SALT || 0x00 || UTF-8(password') )
+ *   bits      = PBKDF2-HMAC-SHA-256(password', salt, 600000 iterations, 512 bits)
+ *   AES-GCM key = bits[0..32)  (non-extractable)
+ *   room id     = hex(bits[32..48))  (32 hex chars; also the relay topic name)
+ * The room id lets anyone who sees it test password guesses offline (each guess costs 600k PBKDF2 rounds),
+ * so a weak password is weak even though the key never leaves the browser.
+ */
+function concatBytes(...parts) {
+  let n = 0;
+  for (const p of parts) n += p.length;
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+async function deriveKeys(password) {
+  const pw = enc.encode(String(password).normalize('NFKC').trim());
+  const salt = viewBytes(await crypto.subtle.digest('SHA-256', concatBytes(enc.encode(APP_SALT), new Uint8Array([0]), pw)));
+  const base = await crypto.subtle.importKey('raw', pw, 'PBKDF2', false, ['deriveBits']);
+  const bits = viewBytes(await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PBKDF2_ITERATIONS }, base, 512));
+  const key = await crypto.subtle.importKey('raw', bits.slice(0, 32), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  const roomId = toHex(bits.slice(32, 48));
+  bits.fill(0);
+  pw.fill(0);
+  return { key, roomId };
+}
+
+/* Fresh random 12-byte IV per message. Never reused. */
+async function seal(key, obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));
+  return { iv: toB64(iv), ct: toB64(ct) };
+}
+/* Returns null on any failure: wrong key, tampering, bad encoding. */
+async function open(key, ivB64, ctB64) {
+  try {
+    const iv = fromB64(ivB64);
+    if (iv.length !== 12) return null;
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, fromB64(ctB64));
+    const obj = JSON.parse(dec.decode(pt));
+    return obj && typeof obj === 'object' ? obj : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getState(m, now) {
+  const remaining = m.ttl - (now - m.sentAt) / 1000;
+  const expired = remaining <= 0;
+  const fading = !expired && remaining <= FADE_SEC;
+  return { remaining, expired, fading, opacity: fading ? Math.max(0.2, remaining / FADE_SEC) : 1 };
+}
+
+/* Judge a decrypted chat payload. Returns a normalised object, or null to discard silently. */
+function acceptIncoming(p, now, seen) {
+  if (!p || typeof p !== 'object') return null;
+  const t = p.t;
+  if (t !== 'm' && t !== 'a' && t !== 'h') return null;
+  if (typeof p.from !== 'string' || p.from.length === 0 || p.from.length > 64) return null;
+  if (typeof p.sentAt !== 'number' || !isFinite(p.sentAt)) return null;
+  const age = (now - p.sentAt) / 1000;
+  if (age < -DRIFT_SEC) return null;
+  if (age > (t === 'h' ? HEARTBEAT_MAX_AGE_SEC : MAX_AGE_SEC)) return null;
+  if (t === 'h') return { t: 'h', from: p.from, r: p.r ? 1 : 0 };
+  if (typeof p.id !== 'string' || p.id.length === 0 || p.id.length > 64) return null;
+  const dedupe = t + ':' + p.id;
+  if (seen.has(dedupe)) return null;
+  const sentAt = Math.min(p.sentAt, now);
+  seen.set(dedupe, sentAt + (MAX_AGE_SEC + DRIFT_SEC) * 1000);
+  if (t === 'a') return { t: 'a', id: p.id, from: p.from };
+  if (typeof p.text !== 'string' || p.text.length === 0 || p.text.length > 4000) return null;
+  let ttl = Number(p.ttl);
+  if (!isFinite(ttl)) ttl = DEFAULT_TTL;
+  ttl = Math.min(MAX_TTL, Math.max(MIN_TTL, Math.round(ttl)));
+  const m = { t: 'm', id: p.id, from: p.from, text: p.text, sentAt, ttl };
+  if (getState(m, now).expired) return null;
+  return m;
+}
+
+const COMMON = new Set(['password', 'password1', 'passw0rd', '123456', '12345678', '123456789', 'qwerty', 'qwertyuiop',
+  'letmein', 'welcome', 'welcome1', 'admin', 'admin123', 'iloveyou', 'secret', 'secretroom', 'monkey', 'dragon', 'abc123', '111111']);
+function assessPassword(pw) {
+  const p = String(pw || '').normalize('NFKC').trim();
+  if (!p) return { empty: true, ok: false, notes: [] };
+  const notes = [];
+  const lower = p.toLowerCase();
+  if (COMMON.has(lower) || COMMON.has(lower.replace(/\d+$/, ''))) notes.push('This is a very common password.');
+  const words = p.split(/[\s_.,+-]+/).filter(w => w.length >= 3).length;
+  if (p.length < 12) notes.push('It is short (under 12 characters).');
+  let pool = 0;
+  if (/[a-z]/.test(p)) pool += 26;
+  if (/[A-Z]/.test(p)) pool += 26;
+  if (/\d/.test(p)) pool += 10;
+  if (/[^a-zA-Z\d]/.test(p)) pool += 33;
+  const bits = Math.round(p.length * Math.log2(pool || 1));
+  if (words < 4) {
+    if (/^[^\d\s]+\d{1,4}[!?.]?$/.test(p)) notes.push('A word followed by digits is one of the first things attackers try.');
+    else if (bits < 70) notes.push('It looks easy to guess.');
+  }
+  return { empty: false, ok: notes.length === 0 && (words >= 4 || bits >= 70), notes, words, bits };
+}
+/* CORE-END */
+
+/* ===== Transports =====
+ * A transport moves opaque encrypted envelopes {iv, ct} between exactly two browsers.
+ * It never sees plaintext. Interface:
+ *   open(handlers)  handlers = { onEnv(env), onUp(bool), onError(err) }
+ *   connected()     true when a send would reach the peer
+ *   send(env)       async, throws {code:'offline'} when not connected
+ *   close()
+ *   name, state     ('waiting' | 'connecting' | 'connected')
+ */
+const NTFY_SERVER = 'https://ntfy.sh';   // public signaling relay; self-host and change this (and the CSP) if you prefer
+const STUN_URLS = ['stun:stun.cloudflare.com:3478'];
+/* Optional TURN server for networks that block direct links, for example your own coturn:
+ *   [{ urls: 'turn:turn.example.org:3478', username: 'user', credential: 'pass' }]
+ * Anything written here is readable by everyone who opens the page, so use a throwaway account. */
+const EXTRA_ICE_SERVERS = [];
+const SIG_CHUNK = 3000;                  // ntfy messages are limited to 4096 bytes
+const HELLO_STEPS = [3000, 6000, 12000, 30000];   // announce quickly, then back off                   // ntfy.sh rate-limits publishers, so keep this slow
+const CONNECT_TIMEOUT_MS = 20000;
+const MANUAL_MAX_MS = 10 * 60 * 1000;
+const SIGNAL_MAX_AGE_SEC = 30;
+
+let useStun = true;   // set from the checkbox at join time
+
+function iceConfig() { return { iceServers: [...(useStun ? [{ urls: STUN_URLS }] : []), ...EXTRA_ICE_SERVERS] }; }
+
+function gathered(pc, ms) {
+  return new Promise(res => {
+    if (pc.iceGatheringState === 'complete') return res();
+    let to;
+    const chk = () => { if (pc.iceGatheringState === 'complete') done(); };
+    const done = () => { pc.removeEventListener('icegatheringstatechange', chk); clearTimeout(to); res(); };
+    pc.addEventListener('icegatheringstatechange', chk);
+    to = setTimeout(done, ms);
+  });
+}
+
+/* One RTCPeerConnection plus its data channel. Non-trickle: the full SDP is sent once. */
+function newLink(cb) {
+  const pc = new RTCPeerConnection(iceConfig());
+  const L = { pc, dc: null, dead: false };
+  const down = () => { if (!L.dead) { L.dead = true; cb.onDown(L); } };
+  const attach = dc => {
+    L.dc = dc;
+    dc.onopen = () => cb.onUp(L);
+    dc.onclose = down;
+    dc.onmessage = e => {
+      if (typeof e.data !== 'string' || e.data.length > 9000) return;
+      let env;
+      try { env = JSON.parse(e.data); } catch (err) { return; }
+      cb.onEnv(env);
+    };
+  };
+  pc.ondatachannel = e => attach(e.channel);
+  pc.onconnectionstatechange = () => { const s = pc.connectionState; if (s === 'failed' || s === 'closed') down(); };
+  L.makeChannel = () => attach(pc.createDataChannel('chat'));
+  L.isOpen = () => !!L.dc && L.dc.readyState === 'open';
+  L.close = () => { L.dead = true; try { if (L.dc) L.dc.close(); } catch (e) { /* gone */ } try { pc.close(); } catch (e) { /* gone */ } };
+  return L;
+}
+function offline() { const e = new Error('offline'); e.code = 'offline'; return e; }
+
+/* --- Transport A: Claude's built-in room (only when this page runs inside Claude) --- */
+function makeClaudeTransport(roomNs, roomId) {
+  const t = { name: 'claude', state: 'waiting', nr: null, unsubs: [] };
+  t.open = async h => {
+    t.nr = await roomNs.join(roomId);
+    t.unsubs.push(t.nr.on('chat', m => { if (m && !m.sameTab) h.onEnv(m.data); }, h.onError));
+    /* Moments sent while the connection is down are dropped, never queued; announce again whenever it comes up. */
+    t.unsubs.push(t.nr.onConnection(up => h.onUp(!!up), h.onError));
+  };
+  t.connected = () => !!t.nr && t.nr.connected();
+  t.send = async env => { if (!t.connected()) throw offline(); await t.nr.emit('chat', env); };
+  t.close = () => {
+    t.unsubs.splice(0).forEach(u => { try { u(); } catch (e) { /* gone */ } });
+    if (t.nr) { const r = t.nr; t.nr = null; try { r.leave().catch(() => {}); } catch (e) { /* gone */ } }
+  };
+  return t;
+}
+
+/* --- Transport B: WebRTC data channel, set up through the ntfy relay ---
+ * The relay carries only AES-GCM sealed setup messages (hello / offer / answer) on a topic derived from
+ * the password. Once the channel is open the relay connection is closed and chat flows browser to browser.
+ * Both sides announce themselves; the one with the smaller session id makes the offer, which avoids clashes. */
+function makeP2PTransport(roomId, getKey, getSession, opts) {
+  const base = NTFY_SERVER.replace(/\/+$/, '') + '/sr-' + roomId;
+  const t = { name: 'p2p', state: 'waiting', link: null, peer: null, role: null, closed: false, relay: false };
+  let h = null, es = null, helloTimer = null, connectTimer = null, lastReply = 0, fails = 0;
+  const chunks = new Map();
+
+  /* Publish one sealed envelope to the relay topic, split into chunks that fit its message limit. */
+  async function post(env) {
+    const s = JSON.stringify(env);
+    const id = newId().slice(0, 8), n = Math.ceil(s.length / SIG_CHUNK);
+    for (let i = 0; i < n; i++) {
+      const r = await fetch(base, { method: 'POST', body: id + '|' + i + '|' + n + '|' + s.slice(i * SIG_CHUNK, (i + 1) * SIG_CHUNK),
+        cache: 'no-store', referrerPolicy: 'no-referrer' });
+      if (!r.ok) { const e = new Error('relay'); e.code = 'relay_' + r.status; throw e; }
+    }
+  }
+  async function sig(obj) {
+    const k = getKey();
+    if (!k) return;
+    await post(await seal(k, obj));
+  }
+  const hello = r => sig({ t: 'hello', from: getSession(), sentAt: Date.now(), r: r ? 1 : 0 });
+
+  function listen() {
+    if (es || t.closed) return;
+    es = new EventSource(base + '/sse');
+    es.onmessage = ev => onSse(ev.data);
+    es.onerror = () => { if (es && es.readyState === 2) { h.onError({ code: 'relay_closed' }); } };
+  }
+  function stopSignaling() {
+    clearTimeout(helloTimer); helloTimer = null;
+    clearTimeout(connectTimer); connectTimer = null;
+    if (es) { es.close(); es = null; }
+    chunks.clear();
+  }
+  function startHello() {
+    clearTimeout(helloTimer);
+    let i = 0;
+    const go = () => {
+      if (t.closed || t.relay || t.state !== 'waiting') return;
+      hello(true).catch(() => h.onError({ code: 'relay_unreachable' }));
+      helloTimer = setTimeout(go, HELLO_STEPS[Math.min(i++, HELLO_STEPS.length - 1)]);
+    };
+    go();
+  }
+  function armTimeout() {
+    clearTimeout(connectTimer);
+    connectTimer = setTimeout(() => { if (t.state === 'connecting' && !(t.link && t.link.isOpen())) reset(); }, CONNECT_TIMEOUT_MS);
+  }
+  /* Relay mode: the same sealed chat envelopes are published on the relay topic instead of a data channel. */
+  function enterRelay(announce) {
+    if (t.relay || t.closed) return;
+    if (t.link) { t.link.close(); t.link = null; }
+    clearTimeout(helloTimer); helloTimer = null;
+    clearTimeout(connectTimer); connectTimer = null;
+    t.relay = true; t.state = 'connected'; t.peer = null; t.role = null;
+    listen();
+    if (announce) h.onError({ code: 'relay_fallback' });
+    h.onUp(true);
+  }
+  function reset() {
+    if (t.closed || t.relay) return;
+    const failed = t.state === 'connecting';
+    if (t.link) { t.link.close(); t.link = null; }
+    t.peer = null; t.role = null; t.state = 'waiting';
+    if (failed && opts.fallback && ++fails >= 2) { enterRelay(true); return; }   // two failed attempts: give up on direct
+    h.onUp(false);
+    listen(); startHello();
+  }
+  function mkLink() {
+    if (t.link) t.link.close();
+    const L = newLink({
+      onUp: l => { if (t.link === l) { t.state = 'connected'; stopSignaling(); h.onUp(true); } },
+      onEnv: env => h.onEnv(env),
+      onDown: l => { if (t.link === l) reset(); }
+    });
+    t.link = L;
+    return L;
+  }
+
+  function onSse(raw) {
+    let j;
+    try { j = JSON.parse(raw); } catch (e) { return; }
+    if (!j || j.event !== 'message' || typeof j.message !== 'string' || j.message.length > 6000) return;
+    const a = j.message.split('|');
+    if (a.length < 4) return;
+    const id = a[0], i = Number(a[1]), n = Number(a[2]);
+    if (id.length > 16 || !(n >= 1 && n <= 8 && i >= 0 && i < n && Number.isInteger(i) && Number.isInteger(n))) return;
+    let c = chunks.get(id);
+    if (!c) {
+      if (chunks.size >= 16) chunks.delete(chunks.keys().next().value);
+      c = { n, parts: [] };
+      chunks.set(id, c);
+    }
+    c.parts[i] = a.slice(3).join('|');
+    let have = 0;
+    for (let x = 0; x < c.n; x++) if (c.parts[x] !== undefined) have++;
+    if (have < c.n) return;
+    chunks.delete(id);
+    let env;
+    try { env = JSON.parse(c.parts.join('')); } catch (e) { return; }
+    handleSignal(env);
+  }
+
+  async function handleSignal(env) {
+    const k = getKey();
+    if (!k || !env || typeof env.iv !== 'string' || typeof env.ct !== 'string' || env.iv.length !== 16 || env.ct.length > 20000) return;
+    const p = await open(k, env.iv, env.ct);
+    if (!p || k !== getKey() || t.closed) return;          // not for us, or locked while decrypting
+    if (typeof p.from !== 'string' || p.from.length > 64 || p.from === getSession()) return;
+    if (p.t === 'm' || p.t === 'a' || p.t === 'h') {       // chat traffic on the relay: the peer is in relay mode
+      if (!opts.fallback && !opts.relayOnly) return;
+      if (!t.relay) enterRelay(true);
+      h.onEnv(env);
+      return;
+    }
+    const age = (Date.now() - p.sentAt) / 1000;
+    if (!(age > -DRIFT_SEC && age < SIGNAL_MAX_AGE_SEC)) return;   // also rejects non-numbers
+    if (p.t === 'hello') return onHello(p.from, !!p.r);
+    if (p.to !== getSession() || typeof p.sdp !== 'string' || p.sdp.length > 20000) return;
+    if (p.t === 'offer') return onOffer(p.from, p.sdp);
+    if (p.t === 'answer') return onAnswer(p.from, p.sdp);
+  }
+
+  function onHello(from, wantsReply) {
+    if (t.relay || (t.link && t.link.isOpen())) return;
+    if (wantsReply && Date.now() - lastReply > 3000) { lastReply = Date.now(); hello(false).catch(() => {}); }
+    if (t.state === 'waiting' && getSession() < from) initiate(from);
+  }
+  async function initiate(from) {
+    if (t.state !== 'waiting') return;
+    t.state = 'connecting'; t.peer = from; t.role = 'offerer';
+    h.onUp(false);
+    const L = mkLink();
+    try {
+      L.makeChannel();
+      await L.pc.setLocalDescription(await L.pc.createOffer());
+      await gathered(L.pc, 4000);
+      await sig({ t: 'offer', from: getSession(), to: from, sdp: L.pc.localDescription.sdp, sentAt: Date.now() });
+      armTimeout();
+    } catch (e) { reset(); }
+  }
+  async function onOffer(from, sdp) {
+    if (t.relay || (t.link && t.link.isOpen())) return;
+    if (t.state === 'connecting' && t.role === 'offerer') return;     // we are the one who offers
+    if (t.state === 'connecting' && t.peer !== from) return;
+    t.state = 'connecting'; t.peer = from; t.role = 'answerer';
+    h.onUp(false);
+    const L = mkLink();
+    try {
+      await L.pc.setRemoteDescription({ type: 'offer', sdp });
+      await L.pc.setLocalDescription(await L.pc.createAnswer());
+      await gathered(L.pc, 4000);
+      await sig({ t: 'answer', from: getSession(), to: from, sdp: L.pc.localDescription.sdp, sentAt: Date.now() });
+      armTimeout();
+    } catch (e) { reset(); }
+  }
+  async function onAnswer(from, sdp) {
+    if (!t.link || t.peer !== from || t.link.pc.signalingState !== 'have-local-offer') return;
+    try { await t.link.pc.setRemoteDescription({ type: 'answer', sdp }); } catch (e) { reset(); }
+  }
+
+  t.open = async handlers => { h = handlers; if (opts.relayOnly) { enterRelay(false); return; } listen(); startHello(); };
+  t.connected = () => (t.relay ? !!es : !!(t.link && t.link.isOpen()));
+  t.send = async env => {
+    if (!t.connected()) throw offline();
+    if (t.relay) await post(env); else t.link.dc.send(JSON.stringify(env));
+  };
+  t.close = () => { t.closed = true; stopSignaling(); if (t.link) { t.link.close(); t.link = null; } };
+  return t;
+}
+
+/* --- Transport C: manual codes. No server of any kind. --- */
+function makeManualTransport(getKey) {
+  const t = { name: 'manual', state: 'waiting', link: null, closed: false };
+  let h = null;
+  function mk() {
+    if (t.link) t.link.close();
+    const L = newLink({
+      onUp: l => { if (t.link === l) { t.state = 'connected'; h.onUp(true); } },
+      onEnv: env => h.onEnv(env),
+      onDown: l => { if (t.link === l && !t.closed) { t.link = null; t.state = 'waiting'; h.onUp(false); } }
+    });
+    t.link = L;
+    return L;
+  }
+  async function pack(obj) { return toB64(enc.encode(JSON.stringify(await seal(getKey(), obj)))); }
+  async function unpack(text) {
+    try {
+      const env = JSON.parse(dec.decode(fromB64(String(text).replace(/\s+/g, ''))));
+      if (!env || typeof env.iv !== 'string' || typeof env.ct !== 'string') return null;
+      const p = await open(getKey(), env.iv, env.ct);
+      if (!p || typeof p.sdp !== 'string' || p.sdp.length > 20000 || typeof p.sentAt !== 'number') return null;
+      if (Math.abs(Date.now() - p.sentAt) > MANUAL_MAX_MS) return null;
+      return p;
+    } catch (e) { return null; }
+  }
+  t.open = async handlers => { h = handlers; };
+  t.createInvite = async () => {
+    const L = mk();
+    L.makeChannel();
+    await L.pc.setLocalDescription(await L.pc.createOffer());
+    await gathered(L.pc, 4000);
+    t.state = 'connecting';
+    return pack({ t: 'offer', sdp: L.pc.localDescription.sdp, sentAt: Date.now() });
+  };
+  t.useCode = async text => {
+    const p = await unpack(text);
+    if (!p) return { error: 'bad' };
+    if (p.t === 'offer') {
+      const L = mk();
+      await L.pc.setRemoteDescription({ type: 'offer', sdp: p.sdp });
+      await L.pc.setLocalDescription(await L.pc.createAnswer());
+      await gathered(L.pc, 4000);
+      t.state = 'connecting';
+      return { out: await pack({ t: 'answer', sdp: L.pc.localDescription.sdp, sentAt: Date.now() }) };
+    }
+    if (p.t === 'answer') {
+      if (!t.link || t.link.pc.signalingState !== 'have-local-offer') return { error: 'order' };
+      await t.link.pc.setRemoteDescription({ type: 'answer', sdp: p.sdp });
+      return { done: true };
+    }
+    return { error: 'bad' };
+  };
+  t.connected = () => !!(t.link && t.link.isOpen());
+  t.send = async env => { if (!t.connected()) throw offline(); t.link.dc.send(JSON.stringify(env)); };
+  t.close = () => { t.closed = true; if (t.link) { t.link.close(); t.link = null; } };
+  return t;
+}
+
+/* ===== UI. Everything lives in memory only. ===== */
+const IDLE_MS = 5 * 60 * 1000;
+const HIDDEN_WIPE_MS = 2 * 60 * 1000;
+const HEARTBEAT_EVERY = 10;
+const PRESENCE_MS = 25000;
+const PEER_FORGET_MS = 60000;
+const ACK_LATE_MS = 8000;
+const NOTICE_MS = 8000;
+const RELAY_TAG = 'Encrypted relay mode. Content stays sealed, but the relay sees the timing and size of every message.';
+
+const $ = id => document.getElementById(id);
+const el = {
+  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), pwToggle: $('pwToggle'), pwHint: $('pwHint'),
+  route: $('route'), stun: $('useStun'), joinBtn: $('joinBtn'), joinStatus: $('joinStatus'),
+  dot: $('dot'), presence: $('presence'), modeTag: $('modeTag'), lockBtn: $('lockBtn'), notice: $('notice'),
+  manual: $('manual'), mBox: $('mBox'), mkInvite: $('mkInvite'), mUse: $('mUse'), mCopy: $('mCopy'), mStatus: $('mStatus'),
+  log: $('log'), empty: $('empty'), composer: $('composer'), input: $('msgInput'), ttl: $('ttl')
+};
+
+let key = null, roomId = null, tp = null, sessionId = null, roomNs = null, joining = false;
+let messages = [];
+let timer = null, hiddenTimer = null, hiddenAt = 0, tickCount = 0, offTicks = 0;
+let lastActivity = Date.now(), lastReplyAt = 0, noticeUntil = 0;
+const seen = new Map(), peerSeen = new Map(), nodes = new Map();
+
+/* Inside Claude, window.claude offers a built-in room. On GitHub Pages it does not exist and stays null. */
+const capsReady = (async () => {
+  try {
+    const c = window.claude;
+    if (c && typeof c.use === 'function') roomNs = await c.use('room').catch(() => null);
+  } catch (e) { /* stays null */ }
+})();
+
+function setJoin(text, kind) { el.joinStatus.textContent = text || ''; el.joinStatus.dataset.kind = kind || ''; }
+function setManual(text, kind) { el.mStatus.textContent = text || ''; el.mStatus.dataset.kind = kind || ''; }
+function notice(text) { el.notice.textContent = text; el.notice.hidden = false; noticeUntil = Date.now() + NOTICE_MS; }
+function clearNotice() { el.notice.hidden = true; el.notice.textContent = ''; }
+
+/* ---------- password guidance ---------- */
+function hintFor(a) {
+  if (a.empty) return 'Tip: four or more random words make a strong shared password.';
+  if (a.ok) return 'Looks strong enough. Give it to the other person by a different route than this chat.';
+  return 'Heads up: ' + a.notes.join(' ') + ' You can still join, but a guessable password can be cracked offline.';
+}
+function updateHint() {
+  const a = assessPassword(el.pw.value);
+  el.pwHint.textContent = hintFor(a);
+  el.pwHint.dataset.level = a.empty ? '' : (a.ok ? 'ok' : 'weak');
+}
+el.pw.addEventListener('input', updateHint);
+el.pwToggle.addEventListener('click', () => {
+  const show = el.pw.type === 'password';
+  el.pw.type = show ? 'text' : 'password';
+  el.pwToggle.textContent = show ? 'Hide' : 'Show';
+  el.pwToggle.setAttribute('aria-pressed', String(show));
+  el.pwToggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+});
+function resetPasswordField() {
+  el.pw.value = ''; el.pw.type = 'password';
+  el.pwToggle.textContent = 'Show'; el.pwToggle.setAttribute('aria-pressed', 'false'); el.pwToggle.setAttribute('aria-label', 'Show password');
+  updateHint();
+}
+updateHint();
+
+/* ---------- joining ---------- */
+function doneJoining() { joining = false; el.joinBtn.disabled = false; }
+
+async function joinRoom() {
+  if (joining) return;
+  if (!el.pw.value.trim()) { setJoin('Enter the shared password to continue.', 'warn'); el.pw.focus(); return; }
+  joining = true; el.joinBtn.disabled = true;
+  setJoin('Connecting…');
+  await capsReady;
+  if (!window.isSecureContext || !window.crypto || !crypto.subtle) {
+    setJoin('This page must be opened over HTTPS (or from localhost) so the browser allows encryption.', 'bad'); doneJoining(); return;
+  }
+  const route = el.route.value;
+  const useMode = route === 'auto' ? (roomNs ? 'claude' : 'p2p') : route === 'relay' ? 'p2p' : route;
+  const rtcOk = typeof RTCPeerConnection !== 'undefined';
+  if ((useMode === 'manual' || route === 'p2p') && !rtcOk) {
+    setJoin('This browser has no WebRTC support. Choose "Encrypted relay only" or use a current browser.', 'bad'); doneJoining(); return;
+  }
+  if (useMode === 'p2p' && typeof EventSource === 'undefined') {
+    setJoin('This browser cannot open the relay connection. Try a current browser.', 'bad'); doneJoining(); return;
+  }
+  const p2pOpts = { relayOnly: route === 'relay' || !rtcOk, fallback: route === 'auto' };
+  useStun = el.stun.checked;
+  setJoin('Deriving keys… this takes a second or two.');
+  await new Promise(r => setTimeout(r, 50));   // let the status paint before the heavy work
+  let k;
+  try { k = await deriveKeys(el.pw.value); }
+  catch (e) { setJoin('This browser could not derive keys. Use a current browser over HTTPS.', 'bad'); doneJoining(); return; }
+  resetPasswordField();
+  key = k.key; roomId = k.roomId; sessionId = newId();
+  lastActivity = Date.now();
+  const getKey = () => key, getSession = () => sessionId;
+  tp = useMode === 'claude' ? makeClaudeTransport(roomNs, roomId)
+    : useMode === 'manual' ? makeManualTransport(getKey)
+    : makeP2PTransport(roomId, getKey, getSession, p2pOpts);
+  try {
+    await tp.open({
+      onEnv: onChat,
+      onUp: up => { if (!key) return; if (up) sendHeartbeat(true); updatePresence(Date.now()); },
+      onError: onTransportError
+    });
+  } catch (e) {
+    const code = e && e.code ? ' (' + e.code + ')' : '';
+    wipeState();
+    setJoin('Could not reach the room' + code + '. Check your connection and try again. You will need to type the password again.', 'bad');
+    doneJoining(); return;
+  }
+  showChat();
+  doneJoining();
+}
+
+function showChat() {
+  el.lock.hidden = true; el.chat.hidden = false;
+  setJoin(''); clearNotice(); setManual('');
+  el.modeTag.textContent = {
+    claude: 'Live room inside Claude. The platform relays encrypted messages and this page stores nothing.',
+    p2p: 'Direct connection. Messages go straight between the two browsers; the relay only saw encrypted setup data.',
+    manual: 'Manual pairing. No server sees anything, not even the setup.'
+  }[tp.name];
+  if (tp.relay) el.modeTag.textContent = RELAY_TAG;
+  el.mBox.value = '';
+  paint(Date.now());
+  updatePresence(Date.now());
+  timer = setInterval(tick, 1000);   // the one timer
+  if (tp.name === 'claude') sendHeartbeat(true);
+  (tp.name === 'manual' ? el.mkInvite : el.input).focus();
+}
+
+function onTransportError(e) {
+  const c = e && e.code;
+  if (c === 'relay_fallback') {
+    notice('A direct link was not possible, so chat now runs through the encrypted relay. Content stays sealed; timing and size are visible to the relay.');
+    el.modeTag.textContent = RELAY_TAG;
+    return;
+  }
+  if (c === 'relay_unreachable') notice('Cannot reach the ntfy relay. Check your connection, or use Manual codes.');
+  else notice('Lost the connection to the platform' + (c ? ' (' + c + ')' : '') + '. Lock and rejoin to try again.');
+}
+
+/* ---------- sending and receiving ---------- */
+async function transmit(obj) {
+  const k = key;
+  if (!k || !tp) return;
+  const env = await seal(k, obj);
+  if (k !== key || !tp) return;
+  if (enc.encode(JSON.stringify(env)).length > MAX_ENVELOPE_BYTES) { const e = new Error('too_large'); e.code = 'too_large'; throw e; }
+  if (!tp.connected()) throw offline();
+  await tp.send(env);
+}
+function sendHeartbeat(request) {
+  transmit({ t: 'h', from: sessionId, sentAt: Date.now(), r: request ? 1 : 0 }).catch(() => {});
+}
+function describeSendError(e) {
+  const c = e && e.code;
+  if (c === 'not_permitted') return "This account can't send in the room. The owner needs to invite you with Contributor access.";
+  if (c === 'offline') return 'Not connected to the other person. The message was not sent.';
+  if (c === 'relay_429') return 'The relay is rate-limiting this connection. Wait a little and try again, or self-host the relay.';
+  if (c === 'too_large') return 'That message is too long to send in one piece. Try splitting it.';
+  return "The room didn't accept that message. It was not sent.";
+}
+
+async function sendMessage() {
+  const text = el.input.value.trim();
+  if (!text || !key) return;
+  const ttl = Math.min(MAX_TTL, Math.max(MIN_TTL, parseInt(el.ttl.value, 10) || DEFAULT_TTL));
+  const now = Date.now();
+  const payload = { t: 'm', id: newId(), from: sessionId, text, sentAt: now, ttl };
+  const local = { t: 'm', id: payload.id, from: sessionId, text, sentAt: now, ttl, mine: true, status: 'sending' };
+  el.input.value = '';
+  messages.push(local);
+  paint(now);
+  try { await transmit(payload); }
+  catch (e) { local.status = 'failed'; notice(describeSendError(e)); paint(Date.now()); }
+}
+
+async function onChat(d) {
+  const k = key;
+  if (!k || !d || typeof d.iv !== 'string' || typeof d.ct !== 'string' || d.iv.length !== 16 || d.ct.length > 8192) return;
+  const p = await open(k, d.iv, d.ct);
+  if (!p || k !== key) return;          // not for me, or locked while decrypting: render nothing
+  if (p.from === sessionId) return;     // my own echo
+  const now = Date.now();
+  const r = acceptIncoming(p, now, seen);
+  if (!r) return;
+  peerSeen.set(r.from, now);
+  if (r.t === 'h') {
+    if (r.r && now - lastReplyAt > 2000) { lastReplyAt = now; sendHeartbeat(false); }
+    updatePresence(now);
+    return;
+  }
+  if (r.t === 'a') {
+    const m = messages.find(x => x.mine && x.id === r.id);
+    if (m && m.status !== 'delivered') { m.status = 'delivered'; paint(now); }
+    return;
+  }
+  messages.push({ ...r, mine: false });
+  paint(now);
+  transmit({ t: 'a', id: r.id, from: sessionId, sentAt: Date.now() }).catch(() => {});
+}
+
+/* ---------- rendering ---------- */
+function buildNode(m) {
+  const n = document.createElement('div');
+  n.className = 'msg ' + (m.mine ? 'sent' : 'recv');
+  n.dataset.id = m.id;
+  const t = document.createElement('div');
+  t.className = 'txt'; t.setAttribute('dir', 'auto'); t.textContent = m.text;   // textContent only: peer text is untrusted
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const ack = document.createElement('span'); ack.className = 'ack';
+  const left = document.createElement('span'); left.className = 'left';
+  meta.append(ack, left);
+  n.append(t, meta);
+  return n;
+}
+function ackText(m, st, now) {
+  if (m.status === 'failed') return 'not sent';
+  if (st.fading) return 'expiring';
+  if (m.status === 'delivered') return 'delivered';
+  return now - m.sentAt > ACK_LATE_MS ? 'sending… no confirmation yet' : 'sending…';
+}
+function paint(now) {
+  const live = new Set();
+  for (const m of messages) {
+    live.add(m.id);
+    const st = getState(m, now);
+    let n = nodes.get(m.id);
+    if (!n) { n = buildNode(m); nodes.set(m.id, n); el.log.append(n); el.log.scrollTop = el.log.scrollHeight; }
+    n.style.opacity = String(st.opacity);
+    n.classList.toggle('fading', st.fading);
+    n.querySelector('.left').textContent = (st.fading ? 'Expires in ' : '') + Math.ceil(st.remaining) + 's';
+    if (m.mine) n.querySelector('.ack').textContent = ackText(m, st, now);
+  }
+  for (const [id, n] of nodes) { if (!live.has(id)) { n.remove(); nodes.delete(id); } }
+  el.empty.hidden = messages.length > 0;
+}
+function updatePresence(now) {
+  if (!tp) return;
+  let text, state = '';
+  const connected = tp.connected();
+  if (tp.name === 'claude' || tp.relay) {
+    offTicks = connected ? 0 : offTicks + 1;
+    if (offTicks >= 2) { text = 'Connection lost. Messages will not send.'; state = 'bad'; }
+    else {
+      let n = 0;
+      const win = tp.relay ? 45000 : PRESENCE_MS;
+      for (const t of peerSeen.values()) if (now - t < win) n++;
+      const via = tp.relay ? ' (via relay)' : '';
+      if (n > 0) { text = 'Someone with the password is here' + via; state = 'on'; }
+      else text = 'Waiting for the other person' + via;
+    }
+  } else if (connected) {
+    text = 'Connected directly to the other person'; state = 'on';
+  } else if (tp.state === 'connecting') {
+    text = 'Connecting…';
+  } else {
+    text = tp.name === 'manual' ? 'Not connected yet. Pair with the codes below.' : 'Waiting for the other person';
+  }
+  el.presence.textContent = text;
+  el.dot.dataset.state = state;
+  el.manual.hidden = !(tp.name === 'manual' && !connected);
+}
+
+/* ---------- the single timer ---------- */
+function tick() {
+  if (!key) return;
+  const now = Date.now();
+  if (now - lastActivity > IDLE_MS) { lock('idle'); return; }
+  messages = messages.filter(m => !getState(m, now).expired);
+  for (const [k, exp] of seen) if (now > exp) seen.delete(k);
+  for (const [k, t] of peerSeen) if (now - t > PEER_FORGET_MS) peerSeen.delete(k);
+  paint(now);
+  tickCount++;
+  if (tickCount % (tp && tp.relay ? 30 : HEARTBEAT_EVERY) === 0) sendHeartbeat(false);   // slower over a rate-limited relay
+  updatePresence(now);
+  if (noticeUntil && now > noticeUntil) { noticeUntil = 0; clearNotice(); }
+}
+
+/* ---------- locking and wiping ---------- */
+function wipeState() {
+  clearInterval(timer); timer = null;
+  clearTimeout(hiddenTimer); hiddenTimer = null; hiddenAt = 0;
+  if (tp) { const t = tp; tp = null; try { t.close(); } catch (e) { /* ignore */ } }
+  key = null; roomId = null; sessionId = null;
+  messages = [];
+  seen.clear(); peerSeen.clear(); nodes.clear();
+  el.log.querySelectorAll('.msg').forEach(n => n.remove());
+  el.empty.hidden = false;
+  el.input.value = ''; el.pw.value = ''; el.mBox.value = '';
+  tickCount = 0; offTicks = 0; noticeUntil = 0;
+  el.manual.hidden = true;
+  clearNotice(); setManual('');
+}
+function lock(reason) {
+  const wasOpen = !!key;
+  wipeState();
+  if (!wasOpen && reason !== 'manual') return;
+  el.chat.hidden = true; el.lock.hidden = false;
+  resetPasswordField();
+  doneJoining();
+  const notes = {
+    idle: 'Locked after 5 minutes without activity. Type the password to rejoin.',
+    hidden: 'Locked because the page was in the background for a while. Type the password to rejoin.',
+    manual: 'Locked. Keys and messages were cleared from this page.'
+  };
+  setJoin(notes[reason] || '', '');
+}
+
+/* ---------- manual pairing buttons ---------- */
+el.mkInvite.addEventListener('click', async () => {
+  if (!tp || tp.name !== 'manual') return;
+  setManual('Creating invite…');
+  try {
+    el.mBox.value = await tp.createInvite();
+    setManual('Send this code to the other person. When they reply, paste their code here and press "Use pasted code".');
+  } catch (e) { setManual('Could not create an invite in this browser.', 'bad'); }
+});
+el.mUse.addEventListener('click', async () => {
+  if (!tp || tp.name !== 'manual') return;
+  const text = el.mBox.value.trim();
+  if (!text) { setManual('Paste the other person\'s code in the box first.', 'warn'); return; }
+  setManual('Working…');
+  try {
+    const r = await tp.useCode(text);
+    if (r.error === 'bad') setManual("That code didn't open. Check the password matches and the code is under 10 minutes old.", 'bad');
+    else if (r.error === 'order') setManual('Press "Create invite" first, then paste their reply.', 'warn');
+    else if (r.out) { el.mBox.value = r.out; setManual('Send this reply code back. The chat opens as soon as they paste it.'); }
+    else if (r.done) { el.mBox.value = ''; setManual('Connecting…'); }
+  } catch (e) { setManual('That code could not be used. Start again with a fresh invite.', 'bad'); }
+});
+el.mCopy.addEventListener('click', async () => {
+  if (!el.mBox.value) return;
+  try { await navigator.clipboard.writeText(el.mBox.value); setManual('Copied.'); }
+  catch (e) { el.mBox.select(); setManual('Select the text and copy it by hand.', 'warn'); }
+});
+
+/* ---------- events ---------- */
+el.form.addEventListener('submit', e => { e.preventDefault(); joinRoom(); });
+el.composer.addEventListener('submit', e => { e.preventDefault(); sendMessage(); el.input.focus(); });
+el.lockBtn.addEventListener('click', () => lock('manual'));
+
+['pointerdown', 'pointermove', 'keydown', 'touchstart', 'focusin', 'input'].forEach(ev =>
+  document.addEventListener(ev, () => { lastActivity = Date.now(); }, { passive: true, capture: true }));
+
+document.addEventListener('visibilitychange', () => {
+  if (!key) return;
+  if (document.hidden) {
+    hiddenAt = Date.now();
+    clearTimeout(hiddenTimer);
+    hiddenTimer = setTimeout(() => lock('hidden'), HIDDEN_WIPE_MS);
+  } else {
+    clearTimeout(hiddenTimer); hiddenTimer = null;
+    if (hiddenAt && Date.now() - hiddenAt >= HIDDEN_WIPE_MS) { lock('hidden'); return; }
+    hiddenAt = 0;
+    tick();   // expiry is computed from sentAt, so catching up after a pause is exact
+  }
+});
+window.addEventListener('pagehide', () => { wipeState(); });
+
+/* Keep the input reachable when a phone keyboard opens. */
+if (window.visualViewport) {
+  const vv = window.visualViewport;
+  vv.addEventListener('resize', () => {
+    if (vv.height < window.innerHeight - 80) {
+      document.documentElement.style.setProperty('--vvh', 'calc(' + vv.height + 'px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))');
+    } else document.documentElement.style.removeProperty('--vvh');
+    el.log.scrollTop = el.log.scrollHeight;
+  });
+}
+</script>
+</body>
+</html>
