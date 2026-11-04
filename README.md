@@ -1,6 +1,6 @@
 # Secret Room Chat
 
-A one-to-one chat that is a single static file. No backend, no accounts, no build step, no Claude account needed.
+A one-to-one chat that is a single static file. No backend, no accounts, no build step,
 Two people type the same password; messages are encrypted in the browser (AES-GCM, key from PBKDF2 with 600,000 iterations) and vanish after 30 to 75 seconds.
 
 ## Requirements
