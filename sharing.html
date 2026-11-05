@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secret Room — File Vault</title>
+<!--
+  chatexa / sharing.html — encrypted file sharing companion page.
+  One static file, no backend, no account. Files are encrypted in the browser (AES-GCM, key from PBKDF2) BEFORE upload,
+  so the host only ever stores random-looking bytes. The file name is encrypted too.
+
+  Upload hosts are open public services that need no account (see HOSTS in the script). To add one, add it to HOSTS and
+  its origin to connect-src below.
+
+  Trust model: the host sees an encrypted blob, its size, and when it was uploaded. It also sees your IP address.
+  Weak passwords, screenshots and spyware are not covered.
+-->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://tmpfile.link https://uguu.se; img-src data: blob:; base-uri 'none'; form-action 'none'">
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212d; --line:#2a2f3d;
+    --text:#e8eaf0; --dim:#9aa1b2; --accent:#6d4aff; --accent2:#8a6dff;
+    --danger:#ff5c5c; --ok:#3ecf8e; --radius:12px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font:15px/1.5 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+    min-height:100vh; display:flex; flex-direction:column;
+  }
+  nav{
+    display:flex; align-items:center; gap:18px;
+    padding:10px 18px; border-bottom:1px solid var(--line);
+    background:var(--panel); position:sticky; top:0; z-index:10;
+  }
+  nav .brand{font-weight:700; letter-spacing:.3px; color:var(--text); text-decoration:none}
+  nav .brand span{color:var(--accent2)}
+  nav a.link{color:var(--dim); text-decoration:none; padding:4px 10px; border-radius:8px}
+  nav a.link:hover{background:var(--panel2); color:var(--text)}
+  nav a.link.active{color:var(--text); background:var(--panel2)}
+  nav .spacer{flex:1}
+  #connState{font-size:12px; color:var(--dim)}
+  #connState.on{color:var(--ok)} #connState.err{color:var(--danger)}
+  main{flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:20px; padding:28px 16px}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:26px; max-width:480px; width:100%;
+  }
+  .card h1{font-size:20px; margin-bottom:6px}
+  .card h2{font-size:17px; margin-bottom:6px}
+  .card p.sub{color:var(--dim); font-size:13px; margin-bottom:18px}
+  label{display:block; font-size:12px; color:var(--dim); margin:12px 0 4px}
+  input[type=text],input[type=password],select{
+    width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line);
+    background:var(--panel2); color:var(--text); font-size:14px; outline:none;
+  }
+  input[type=file]{width:100%; font-size:13px; color:var(--dim)}
+  input:focus,select:focus{border-color:var(--accent)}
+  .btn-row{display:flex; gap:10px; margin-top:18px}
+  button{
+    flex:1; padding:11px; border:none; border-radius:8px;
+    background:var(--accent); color:#fff; font-size:15px; font-weight:600; cursor:pointer;
+  }
+  button:hover:not(:disabled){background:var(--accent2)}
+  button:disabled{opacity:.5; cursor:default}
+  button.secondary{background:transparent; border:1px solid var(--line)}
+  button.secondary:hover:not(:disabled){color:var(--accent); border-color:var(--accent)}
+  .note{font-size:11.5px; color:var(--dim); margin-top:14px; line-height:1.45}
+  .drop-zone{
+    border:2px dashed var(--line); border-radius:10px; padding:36px; text-align:center;
+    cursor:pointer; transition:border-color .2s,background .2s; margin-top:14px;
+  }
+  .drop-zone:hover,.drop-zone.dragover{border-color:var(--accent); background:var(--panel2)}
+  .drop-zone input{display:none}
+  .drop-zone .icon{font-size:42px; margin-bottom:8px; display:block}
+  .file-list{margin-top:14px; max-height:200px; overflow-y:auto}
+  .file-item{
+    display:flex; align-items:center; gap:10px; padding:8px;
+    border-radius:6px; margin-top:6px; background:var(--panel2);
+  }
+  .file-item .thumb{width:48px; height:48px; flex:none; border-radius:4px; object-fit:cover; background:#000;
+    display:flex; align-items:center; justify-content:center; font-size:20px}
+  .file-item .meta{flex:1; min-width:0; font-size:12.5px}
+  .file-item .meta b{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .file-item .progress{height:3px; background:var(--line); border-radius:2px; overflow:hidden; margin-top:4px}
+  .file-item .fill{height:100%; background:var(--accent); width:0}
+  .file-item .done{color:var(--ok); font-size:11px}
+  #shareLink{width:100%; min-height:90px; margin-top:14px; padding:10px; border-radius:8px; border:1px solid var(--line);
+              background:var(--panel2); color:var(--dim); font-size:12px; word-break:break-all;
+              display:none}
+  #joinErr{color:var(--danger); font-size:12.5px; margin-top:10px; display:none}
+  #uploadStatus,#rxStatus{margin-top:10px; font-size:12.5px; color:var(--dim)}
+  #rxStatus.bad{color:var(--danger)}
+  #pwHint{font-size:12px; color:var(--dim); margin-top:6px; min-height:1.4em}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="../index.html">Secret<span>Room</span></a>
+  <a class="link" href="../index.html">One-to-one</a>
+  <a class="link" href="Group.html">Group</a>
+  <a class="link active" href="sharing.html">File Vault</a>
+  <span class="spacer"></span>
+  <span id="connState">offline</span>
+</nav>
+
+<main>
+  <section class="card">
+    <h1>Encrypted file vault</h1>
+    <p class="sub">Files are encrypted in your browser before upload, so the host stores only random-looking bytes. Send the link and the password to the other person by different routes.</p>
+
+    <label for="storageType">Upload host (open service, no account)</label>
+    <select id="storageType">
+      <option value="tmpfile">tmpfile.link: up to 100 MB, kept 7 days</option>
+      <option value="uguu">uguu.se: short-lived</option>
+    </select>
+
+    <label for="vaultPass">Password</label>
+    <input type="password" id="vaultPass" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Four or more random words">
+    <p id="pwHint"></p>
+
+    <div class="drop-zone" id="dropZone">
+      <span class="icon">📁</span>
+      <span>Click to select files, or drag &amp; drop here</span>
+      <input type="file" id="fileInput" multiple>
+    </div>
+
+    <div class="file-list" id="fileList"></div>
+
+    <div id="uploadStatus" role="status" aria-live="polite"></div>
+    <textarea id="shareLink" readonly placeholder="Share links will appear here after upload"></textarea>
+
+    <div class="btn-row">
+      <button id="encryptBtn" disabled>Encrypt &amp; upload</button>
+      <button id="copyBtn" class="secondary" disabled>Copy links</button>
+    </div>
+
+    <div id="joinErr" role="alert"></div>
+    <p class="note">
+      <strong>How it works:</strong> pick files, choose a password, upload. Each file becomes one encrypted <code>.enc</code> file on the host.
+      The host sees its size and when it was uploaded, and your IP address, but not the name or content.
+      Anyone with a link can download the encrypted file, so a weak password can be guessed offline.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Open a received file</h2>
+    <p class="sub">Open the link you were sent, save the <code>.enc</code> file, then choose it here with the password.</p>
+    <label for="rxFile">Encrypted file</label>
+    <input type="file" id="rxFile" accept=".enc">
+    <label for="rxPass">Password</label>
+    <input type="password" id="rxPass" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="btn-row"><button id="openBtn">Decrypt &amp; save</button></div>
+    <div id="rxStatus" role="status" aria-live="polite"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+(function(){
+  const $ = id => document.getElementById(id);
+
+  /* VAULT-BEGIN */
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const ITER = 600000;
+  const MAGIC = [0x43, 0x58, 0x56, 0x31];   // "CXV1"
+  const HEAD = 32;                          // magic 4 + salt 16 + iv 12
+
+  async function sha256(s){
+    return new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(s)));
+  }
+  function b64(bytes){
+    let s = "";
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+  async function deriveKey(pass, saltBytes){
+    const salt = await sha256("chatexa-filevault:" + b64(saltBytes));
+    const km = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name:"PBKDF2", salt, iterations:ITER, hash:"SHA-256" },
+      km, { name:"AES-GCM", length:256 }, false, ["encrypt","decrypt"]);
+  }
+
+  /* File format: "CXV1" | salt (16) | iv (12) | AES-GCM( nameLength (2) | name | file bytes ).
+   * The first 32 bytes are authenticated too. The file name sits inside the encrypted part, so the host never sees it. */
+  async function packFile(name, bytes, pass){
+    const head = new Uint8Array(HEAD);
+    head.set(MAGIC, 0);
+    crypto.getRandomValues(head.subarray(4, HEAD));
+    const key = await deriveKey(pass, head.subarray(4, 20));
+    const nm = enc.encode(String(name).slice(0, 120));
+    const plain = new Uint8Array(2 + nm.length + bytes.length);
+    plain[0] = nm.length >> 8; plain[1] = nm.length & 255;
+    plain.set(nm, 2); plain.set(bytes, 2 + nm.length);
+    const ct = new Uint8Array(await crypto.subtle.encrypt(
+      { name:"AES-GCM", iv:head.subarray(20, HEAD), additionalData:head }, key, plain));
+    const out = new Uint8Array(HEAD + ct.length);
+    out.set(head, 0); out.set(ct, HEAD);
+    return out;
+  }
+  async function unpackFile(bytes, pass){
+    if (bytes.length < HEAD + 16 + 2 || MAGIC.some((b, i) => bytes[i] !== b)) throw new Error("This is not a vault file.");
+    const head = bytes.subarray(0, HEAD);
+    const key = await deriveKey(pass, head.subarray(4, 20));
+    let plain;
+    try {
+      plain = new Uint8Array(await crypto.subtle.decrypt(
+        { name:"AES-GCM", iv:head.subarray(20, HEAD), additionalData:head }, key, bytes.subarray(HEAD)));
+    } catch (e) { throw new Error("Wrong password, or the file was changed."); }
+    const n = (plain[0] << 8) | plain[1];
+    if (plain.length < 2 + n) throw new Error("The file is damaged.");
+    return { name: dec.decode(plain.subarray(2, 2 + n)), data: plain.subarray(2 + n) };
+  }
+  /* VAULT-END */
+
+  /* ── upload hosts: open services, no account ── */
+  const HOSTS = {
+    tmpfile: { url:"https://tmpfile.link/api/upload", field:"file",    max:100 * 1024 * 1024 },
+    uguu:    { url:"https://uguu.se/upload.php",      field:"files[]", max:0 }   // 0: let the host decide
+  };
+
+  function walkForUrl(v){
+    if (typeof v === "string") return /^https:\/\//.test(v) ? v : null;
+    if (v && typeof v === "object") for (const k of Object.keys(v)) { const r = walkForUrl(v[k]); if (r) return r; }
+    return null;
+  }
+  /* Hosts answer with JSON or plain text; take the first https link either way. */
+  function firstUrl(text){
+    try { const found = walkForUrl(JSON.parse(text)); if (found) return found; } catch (e) { /* not JSON */ }
+    const m = String(text).match(/https:\/\/[^\s"'<>]+/);
+    return m ? m[0] : null;
+  }
+  function randomName(){
+    const b = crypto.getRandomValues(new Uint8Array(6));
+    return "cx-" + Array.from(b, x => x.toString(16).padStart(2, "0")).join("") + ".enc";
+  }
+  function upload(hostKey, blob, onProgress){
+    const h = HOSTS[hostKey];
+    return new Promise((resolve, reject) => {
+      const fd = new FormData();
+      fd.append(h.field, blob, randomName());
+      const x = new XMLHttpRequest();
+      x.open("POST", h.url);
+      x.timeout = 10 * 60 * 1000;
+      x.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.onload = () => {
+        if (x.status < 200 || x.status >= 300) return reject(new Error("The host answered HTTP " + x.status + "."));
+        const link = firstUrl(x.responseText);
+        if (link) resolve(link); else reject(new Error("The host did not return a link."));
+      };
+      x.onerror = () => reject(new Error("Could not reach the host. It may be down, or it may not allow uploads from a web page. Try the other host."));
+      x.ontimeout = () => reject(new Error("The upload took too long."));
+      x.send(fd);
+    });
+  }
+
+  /* ── UI helpers ── */
+  function err(msg){ const e = $("joinErr"); e.textContent = msg; e.style.display = msg ? "block" : "none"; }
+  function status(txt){ $("uploadStatus").textContent = txt || ""; }
+  function rx(txt, bad){ const e = $("rxStatus"); e.textContent = txt || ""; e.className = bad ? "bad" : ""; }
+  function bytes(n){ return n >= 1e9 ? (n/1e9).toFixed(2)+" GB" : n >= 1e6 ? (n/1e6).toFixed(2)+" MB" : n >= 1e3 ? (n/1e3).toFixed(1)+" KB" : n+" B"; }
+  function safeName(n){ return String(n).replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 200) || "file"; }
+
+  $("vaultPass").addEventListener("input", e => {
+    const p = e.target.value;
+    $("pwHint").textContent = !p ? "" : p.length < 12
+      ? "Short passwords can be guessed offline by anyone who gets the link. Use four or more random words."
+      : "";
+  });
+
+  /* ── file handling ── */
+  let pendingFiles = [];
+  let uploadProgress = new Map();
+
+  $("dropZone").addEventListener("click", () => $("fileInput").click());
+  $("dropZone").addEventListener("dragover", e => { e.preventDefault(); $("dropZone").classList.add("dragover"); });
+  $("dropZone").addEventListener("dragleave", () => $("dropZone").classList.remove("dragover"));
+  $("dropZone").addEventListener("drop", e => {
+    e.preventDefault();
+    $("dropZone").classList.remove("dragover");
+    handleFiles(e.dataTransfer.files);
+  });
+  $("fileInput").addEventListener("change", e => handleFiles(e.target.files));
+
+  function handleFiles(files){
+    pendingFiles = [...pendingFiles, ...Array.from(files)];
+    renderFileList();
+  }
+
+  function renderFileList(){
+    const list = $("fileList");
+    list.replaceChildren();
+    uploadProgress = new Map();
+    pendingFiles.forEach((f, idx) => {
+      const div = document.createElement("div");
+      div.className = "file-item";
+
+      let thumb;
+      if (f.type.startsWith("image/")) {
+        thumb = document.createElement("img");
+        thumb.alt = "";
+        const url = URL.createObjectURL(f);
+        thumb.onload = () => URL.revokeObjectURL(url);
+        thumb.src = url;
+      } else {
+        thumb = document.createElement("div");
+        thumb.textContent = "📄";
+      }
+      thumb.classList.add("thumb");
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const nameEl = document.createElement("b");
+      nameEl.textContent = f.name;                      // textContent: file names are untrusted
+      const sizeEl = document.createElement("span");
+      sizeEl.textContent = bytes(f.size);
+      const progress = document.createElement("div");
+      progress.className = "progress";
+      const fill = document.createElement("div");
+      fill.className = "fill";
+      progress.appendChild(fill);
+      const done = document.createElement("div");
+      done.className = "done";
+      meta.append(nameEl, sizeEl, progress, done);
+
+      div.append(thumb, meta);
+      list.appendChild(div);
+      uploadProgress.set(idx, { fill, done });
+    });
+    $("encryptBtn").disabled = pendingFiles.length === 0;
+  }
+
+  /* ── upload flow ── */
+  $("encryptBtn").addEventListener("click", async () => {
+    err("");
+    const pass = $("vaultPass").value;
+    if (!pass) { err("Enter a password first. Give it to the other person by a different route than the link."); return; }
+    const host = $("storageType").value, h = HOSTS[host];
+    const lines = [];
+    $("encryptBtn").disabled = true;
+    try {
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const f = pendingFiles[i], p = uploadProgress.get(i);
+        if (h.max && f.size > h.max) throw new Error(f.name + " is larger than this host allows (" + bytes(h.max) + ").");
+        status("Encrypting " + (i + 1) + " of " + pendingFiles.length + "…");
+        const packed = await packFile(f.name, new Uint8Array(await f.arrayBuffer()), pass);
+        status("Uploading " + (i + 1) + " of " + pendingFiles.length + "…");
+        const link = await upload(host, new Blob([packed], { type:"application/octet-stream" }),
+          r => { p.fill.style.width = Math.round(r * 100) + "%"; });
+        p.fill.style.width = "100%";
+        p.done.textContent = "✓ uploaded";
+        lines.push(f.name + ": " + link);
+      }
+      status("Done. Send the links, and the password by a different route.");
+      $("connState").textContent = "ready";
+      $("connState").className = "on";
+    } catch (e) {
+      err("Upload failed: " + e.message);
+      status(lines.length ? "Files finished before the error are listed below." : "");
+    } finally {
+      if (lines.length) {
+        $("shareLink").value = lines.join("\n");
+        $("shareLink").style.display = "block";
+        $("copyBtn").disabled = false;
+      }
+      $("encryptBtn").disabled = pendingFiles.length === 0;
+    }
+  });
+
+  $("copyBtn").addEventListener("click", () => {
+    navigator.clipboard.writeText($("shareLink").value).then(() => {
+      $("copyBtn").textContent = "Copied!";
+      setTimeout(() => $("copyBtn").textContent = "Copy links", 1500);
+    }, () => { $("shareLink").select(); err("Select the text and copy it by hand."); });
+  });
+
+  /* ── receiving ── */
+  $("openBtn").addEventListener("click", async () => {
+    const f = $("rxFile").files[0], pass = $("rxPass").value;
+    if (!f) { rx("Choose the downloaded .enc file first.", true); return; }
+    if (!pass) { rx("Enter the password.", true); return; }
+    $("openBtn").disabled = true;
+    rx("Decrypting…");
+    try {
+      const out = await unpackFile(new Uint8Array(await f.arrayBuffer()), pass);
+      const url = URL.createObjectURL(new Blob([out.data], { type:"application/octet-stream" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = safeName(out.name);
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      rx("Saved " + safeName(out.name) + ".");
+    } catch (e) {
+      rx(e.message, true);
+    } finally {
+      $("openBtn").disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>
