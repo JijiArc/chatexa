@@ -491,7 +491,7 @@ function makeClaudeTransport(roomNs, roomId) {
  * cb.onFail(code) for a channel that cannot recover by itself. */
 function makeNtfyChannel(roomId, cb) {
   const base = NTFY_SERVER.replace(/\/+$/, '') + '/sr-' + roomId;
-  let es = null;
+  let es = null, want = false, retry = 0, timer = null;
   const chunks = new Map();
 
   /* Publish one sealed envelope to the relay topic, split into chunks that fit its message limit. */
@@ -527,17 +527,27 @@ function makeNtfyChannel(roomId, cb) {
     try { env = JSON.parse(c.parts.join('')); } catch (e) { return; }
     cb.onEnv(env);
   }
+  function open() {
+    if (!want || es) return;
+    /* since=20s replays what was published just before we connected, so an offer sent while this side was
+     * still opening its stream is not lost. Replays are harmless: the transport drops repeated envelopes by iv. */
+    const s = new EventSource(base + '/sse?since=20s');
+    es = s;
+    s.onopen = () => { retry = 0; };
+    s.onmessage = ev => onSse(ev.data);
+    s.onerror = () => {
+      if (es !== s || s.readyState !== 2) return;   // the browser retries by itself while the state is 'connecting'
+      s.close(); es = null; chunks.clear();
+      if (cb.onState) cb.onState(false);
+      cb.onFail('relay_closed');
+      if (want && !timer) timer = setTimeout(() => { timer = null; open(); if (es && cb.onState) cb.onState(true); }, Math.min(30000, 1000 * Math.pow(2, retry++)));
+    };
+  }
   return {
     name: 'ntfy',
-    start() {
-      if (es) return;
-      /* since=20s replays what was published just before we connected, so an offer sent while this side was
-       * still opening its stream is not lost. Replays are harmless: setup messages expire and chat ids are deduped. */
-      es = new EventSource(base + '/sse?since=20s');
-      es.onmessage = ev => onSse(ev.data);
-      es.onerror = () => { if (es && es.readyState === 2) cb.onFail('relay_closed'); };
-    },
-    stop() { if (es) { es.close(); es = null; } chunks.clear(); },
+    start() { want = true; open(); },
+    stop() { want = false; clearTimeout(timer); timer = null; if (es) { es.close(); es = null; } chunks.clear(); },
+    kick() { if (want && !es) { clearTimeout(timer); timer = null; open(); if (es && cb.onState) cb.onState(true); } },
     post,
     up: () => !!es
   };
@@ -594,11 +604,46 @@ function makeWsChannel(roomId, cb) {
       clearTimeout(retryTimer); retryTimer = null; stopPing();
       if (ws) { const s = ws; ws = null; try { s.close(); } catch (e) { /* gone */ } }
     },
+    /* The network changed or the page came back to the foreground: reconnect now instead of waiting out the backoff,
+     * and prove an apparently open socket is alive (a pong must arrive within 4 seconds or it is replaced). */
+    kick() {
+      if (closed) return;
+      if (!ws) { clearTimeout(retryTimer); retryTimer = null; retry = 0; open(); return; }
+      if (ws.readyState !== 1) return;
+      const before = lastRx, s = ws;
+      try { s.send('ping'); } catch (e) { /* closing */ }
+      setTimeout(() => { if (ws === s && lastRx === before) { try { s.close(); } catch (e) { /* gone */ } } }, 4000);
+    },
     async post(env) {
       if (!ws || ws.readyState !== 1) throw offline();
       ws.send(JSON.stringify(env));
     },
     up: () => !!ws && ws.readyState === 1
+  };
+}
+
+/* Cloudflare relay as the primary rail with ntfy.sh standing by. We listen on both, so it does not matter which one the
+ * other person's messages arrive on. We send on the primary when it is up and on the standby when it is not. With
+ * both=true (retries of unconfirmed messages, setup messages) the same envelope goes out on both rails, because the
+ * primary can look healthy from here while the other side's connection to it is down. */
+function makeDualChannel(roomId, cb) {
+  const a = makeWsChannel(roomId, cb);
+  const b = makeNtfyChannel(roomId, { onEnv: cb.onEnv, onFail: () => {} });
+  return {
+    name: 'dual',
+    start() { a.start(); b.start(); },
+    stop() { a.stop(); b.stop(); },
+    kick() { a.kick(); b.kick(); },
+    async post(env, both) {
+      if (both) {
+        const r = await Promise.allSettled([a.post(env), b.post(env)]);
+        if (!r.some(x => x.status === 'fulfilled')) throw r[0].reason;
+        return;
+      }
+      if (a.up()) { try { await a.post(env); return; } catch (e) { /* fall through to the standby */ } }
+      await b.post(env);
+    },
+    up: () => a.up() || b.up()
   };
 }
 
@@ -609,7 +654,8 @@ function makeWsChannel(roomId, cb) {
 function makeP2PTransport(roomId, getKey, getSession, opts) {
   const t = { name: 'p2p', state: 'waiting', link: null, peer: null, role: null, closed: false, relay: false };
   let h = null, helloTimer = null, connectTimer = null, lastReply = 0, fails = 0;
-  const chan = (RELAY_URL ? makeWsChannel : makeNtfyChannel)(roomId, {
+  const seenIv = new Map();   // sealed envelopes already handled; the same one can arrive on two rails or be replayed
+  const chan = (RELAY_URL ? makeDualChannel : makeNtfyChannel)(roomId, {
     onEnv: env => handleSignal(env),
     onState: up => {
       if (t.closed) return;
@@ -622,7 +668,7 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
   async function sig(obj) {
     const k = getKey();
     if (!k) return;
-    await chan.post(await seal(k, obj));
+    await chan.post(await seal(k, obj), true);   // setup messages go out on every rail
   }
   const hello = r => sig({ t: 'hello', from: getSession(), sentAt: Date.now(), r: r ? 1 : 0 });
 
@@ -658,10 +704,12 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
   }
   function reset() {
     if (t.closed || t.relay) return;
-    const failed = t.state === 'connecting';
+    const wasUp = t.state === 'connected', failed = t.state === 'connecting';
     if (t.link) { t.link.close(); t.link = null; }
     t.peer = null; t.role = null; t.state = 'waiting';
-    if (failed && opts.fallback && ++fails >= 2) { enterRelay(true); return; }   // two failed attempts: give up on direct
+    /* Automatic mode never leaves the chat dead: a direct link that drops after working, or two failed attempts to
+     * set one up, moves the conversation onto the relay straight away. */
+    if (opts.fallback && ((failed && ++fails >= 2) || wasUp)) { enterRelay(true); return; }
     h.onUp(false);
     chan.start(); startHello();
   }
@@ -679,6 +727,10 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
   async function handleSignal(env) {
     const k = getKey();
     if (!k || !env || typeof env.iv !== 'string' || typeof env.ct !== 'string' || env.iv.length !== 16 || env.ct.length > 20000) return;
+    const now = Date.now();
+    if (seenIv.has(env.iv)) return;
+    seenIv.set(env.iv, now + 180000);
+    if (seenIv.size > 300) for (const [x, exp] of seenIv) if (exp < now) seenIv.delete(x);
     const p = await open(k, env.iv, env.ct);
     if (!p || k !== getKey() || t.closed) return;          // not for us, or locked while decrypting
     if (typeof p.from !== 'string' || p.from.length > 64 || p.from === getSession()) return;
@@ -697,7 +749,11 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
   }
 
   function onHello(from, wantsReply) {
-    if (t.relay || (t.link && t.link.isOpen())) return;
+    if (t.relay) {   // someone (re)joined while we are on the relay: answer with a relay heartbeat so they switch over too
+      if (wantsReply && Date.now() - lastReply > 3000) { lastReply = Date.now(); h.onUp(true); }
+      return;
+    }
+    if (t.link && t.link.isOpen()) return;
     if (wantsReply && Date.now() - lastReply > 3000) { lastReply = Date.now(); hello(false).catch(() => {}); }
     if (t.state === 'waiting' && getSession() < from) initiate(from);
   }
@@ -736,10 +792,11 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
 
   t.open = async handlers => { h = handlers; if (opts.relayOnly) { enterRelay(false); return; } chan.start(); startHello(); };
   t.connected = () => (t.relay ? chan.up() : !!(t.link && t.link.isOpen()));
-  t.send = async env => {
+  t.send = async (env, both) => {
     if (!t.connected()) throw offline();
-    if (t.relay) await chan.post(env); else t.link.dc.send(JSON.stringify(env));
+    if (t.relay) await chan.post(env, both); else t.link.dc.send(JSON.stringify(env));
   };
+  t.kick = () => { if (!t.closed && chan.kick) chan.kick(); };
   t.close = () => { t.closed = true; stopSignaling(); if (t.link) { t.link.close(); t.link = null; } };
   return t;
 }
@@ -938,7 +995,7 @@ function showChat() {
 function onTransportError(e) {
   const c = e && e.code;
   if (c === 'relay_fallback') {
-    notice('A direct link was not possible, so chat now runs through the encrypted relay. Content stays sealed; timing and size are visible to the relay.');
+    notice('The direct link was not possible or dropped, so chat now runs through the encrypted relay. Content stays sealed; timing and size are visible to the relay.');
     el.modeTag.textContent = RELAY_TAG;
     return;
   }
@@ -947,14 +1004,31 @@ function onTransportError(e) {
 }
 
 /* ---------- sending and receiving ---------- */
-async function transmit(obj) {
+async function transmit(obj, both) {
   const k = key;
   if (!k || !tp) return;
   const env = await seal(k, obj);
   if (k !== key || !tp) return;
   if (enc.encode(JSON.stringify(env)).length > MAX_ENVELOPE_BYTES) { const e = new Error('too_large'); e.code = 'too_large'; throw e; }
   if (!tp.connected()) throw offline();
-  await tp.send(env);
+  await tp.send(env, both);
+}
+
+/* A message stays "sending" until the other side confirms it. Unconfirmed messages are sent again every few seconds
+ * for as long as they live (the receiver drops repeats by id and confirms again), and from the third attempt on they go
+ * out on every available rail. Only errors that retrying cannot fix mark a message as failed. */
+const RETRY_FIRST_MS = 2500;
+const RETRY_EVERY_MS = 4000;
+const MAX_TRIES = 12;
+const HARD_ERRORS = new Set(['too_large', 'not_permitted']);
+function retryUnconfirmed(now) {
+  if (!tp || !tp.connected()) return;
+  for (const m of messages) {
+    if (!m.mine || m.status !== 'sending' || !m.payload || m.tries >= MAX_TRIES) continue;
+    if (now - m.lastTry < (m.tries === 0 ? RETRY_FIRST_MS : RETRY_EVERY_MS)) continue;
+    m.lastTry = now; m.tries++;
+    transmit(m.payload, m.tries >= 2).catch(e => { if (HARD_ERRORS.has(e && e.code)) { m.status = 'failed'; paint(Date.now()); } });
+  }
 }
 function sendHeartbeat(request) {
   transmit({ t: 'h', from: sessionId, sentAt: Date.now(), r: request ? 1 : 0 }).catch(() => {});
@@ -974,12 +1048,15 @@ async function sendMessage() {
   const ttl = Math.min(MAX_TTL, Math.max(MIN_TTL, parseInt(el.ttl.value, 10) || DEFAULT_TTL));
   const now = Date.now();
   const payload = { t: 'm', id: newId(), from: sessionId, text, sentAt: now, ttl };
-  const local = { t: 'm', id: payload.id, from: sessionId, text, sentAt: now, ttl, mine: true, status: 'sending' };
+  const local = { t: 'm', id: payload.id, from: sessionId, text, sentAt: now, ttl, mine: true, status: 'sending', payload, tries: 0, lastTry: now };
   el.input.value = '';
   messages.push(local);
   paint(now);
   try { await transmit(payload); }
-  catch (e) { local.status = 'failed'; notice(describeSendError(e)); paint(Date.now()); }
+  catch (e) {
+    if (HARD_ERRORS.has(e && e.code)) { local.status = 'failed'; notice(describeSendError(e)); }
+    paint(Date.now());   // anything else stays queued and is retried by tick()
+  }
 }
 
 async function onChat(d) {
@@ -989,6 +1066,10 @@ async function onChat(d) {
   if (!p || k !== key) return;          // not for me, or locked while decrypting: render nothing
   if (p.from === sessionId) return;     // my own echo
   const now = Date.now();
+  if (p.t === 'm' && typeof p.id === 'string' && seen.has('m:' + p.id)) {   // a repeat: our confirmation did not arrive, send it again on every rail
+    transmit({ t: 'a', id: p.id, from: sessionId, sentAt: now }, true).catch(() => {});
+    return;
+  }
   const r = acceptIncoming(p, now, seen);
   if (!r) return;
   peerSeen.set(r.from, now);
@@ -1026,7 +1107,8 @@ function ackText(m, st, now) {
   if (m.status === 'failed') return 'not sent';
   if (st.fading) return 'expiring';
   if (m.status === 'delivered') return 'delivered';
-  return now - m.sentAt > ACK_LATE_MS ? 'sending… no confirmation yet' : 'sending…';
+  if (tp && !tp.connected()) return 'waiting for connection…';
+  return now - m.sentAt > ACK_LATE_MS ? 'retrying…' : 'sending…';
 }
 function paint(now) {
   const live = new Set();
@@ -1078,6 +1160,7 @@ function tick() {
   messages = messages.filter(m => !getState(m, now).expired);
   for (const [k, exp] of seen) if (now > exp) seen.delete(k);
   for (const [k, t] of peerSeen) if (now - t > PEER_FORGET_MS) peerSeen.delete(k);
+  retryUnconfirmed(now);
   paint(now);
   tickCount++;
   if (tickCount % (tp && tp.relay ? 30 : HEARTBEAT_EVERY) === 0) sendHeartbeat(false);   // slower over a rate-limited relay
@@ -1161,10 +1244,12 @@ document.addEventListener('visibilitychange', () => {
     clearTimeout(hiddenTimer); hiddenTimer = null;
     if (hiddenAt && Date.now() - hiddenAt >= HIDDEN_WIPE_MS) { lock('hidden'); return; }
     hiddenAt = 0;
+    if (tp && tp.kick) tp.kick();   // back in the foreground: make sure the relay connection is alive
     tick();   // expiry is computed from sentAt, so catching up after a pause is exact
   }
 });
 window.addEventListener('pagehide', () => { wipeState(); });
+window.addEventListener('online', () => { if (tp && tp.kick) tp.kick(); });   // network came back or changed: reconnect now
 
 /* Keep the input reachable when a phone keyboard opens. */
 if (window.visualViewport) {

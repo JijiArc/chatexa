@@ -1,0 +1,90 @@
+name: Deploy relay to Cloudflare
+
+# Deploys relay/ (the Cloudflare Worker + Durable Object) from GitHub, so no terminal is needed.
+# One-time setup, in the repository's Settings > Secrets and variables > Actions:
+#   CLOUDFLARE_API_TOKEN   token with "Edit Cloudflare Workers" permission (My Profile > API Tokens > Edit Cloudflare Workers template)
+#   CLOUDFLARE_ACCOUNT_ID  your account id (Workers & Pages overview, right-hand side)
+#   TURN_KEY_ID            optional, from Cloudflare dashboard > Realtime > TURN
+#   TURN_KEY_API_TOKEN     optional, the matching TURN key API token
+# Then run this workflow once from the Actions tab. The job summary shows the worker URL to put in RELAY_URL.
+
+on:
+  push:
+    branches: [main]
+    paths: ['relay/**', '.github/workflows/deploy-relay.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TURN_KEY_ID: ${{ secrets.TURN_KEY_ID }}
+      TURN_KEY_API_TOKEN: ${{ secrets.TURN_KEY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check credentials
+        run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$CF_ACCOUNT" ]; then
+            echo "::error::Add the CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets first (see the top of this file)."
+            exit 1
+          fi
+          if [ -z "$TURN_KEY_ID" ] || [ -z "$TURN_KEY_API_TOKEN" ]; then
+            echo "::warning::TURN_KEY_ID / TURN_KEY_API_TOKEN not set. The relay will work, but strict networks cannot make direct connections."
+          fi
+
+      - name: Deploy (with TURN secrets)
+        id: with_turn
+        if: ${{ env.TURN_KEY_ID != '' && env.TURN_KEY_API_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: relay
+          secrets: |
+            TURN_KEY_ID
+            TURN_KEY_API_TOKEN
+
+      - name: Deploy (without TURN)
+        id: no_turn
+        if: ${{ env.TURN_KEY_ID == '' || env.TURN_KEY_API_TOKEN == '' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: relay
+
+      - name: Health check and summary
+        env:
+          OUT_A: ${{ steps.with_turn.outputs.command-output }}
+          OUT_B: ${{ steps.no_turn.outputs.command-output }}
+        run: |
+          URL=$(printf '%s\n%s\n' "$OUT_A" "$OUT_B" | grep -oE 'https://[A-Za-z0-9._-]+\.workers\.dev' | head -1 || true)
+          {
+            echo "## Relay deployed"
+            if [ -n "$URL" ]; then
+              echo "Worker URL: \`$URL\`"
+              echo ""
+              echo "Set this in \`index.html\`:"
+              echo '```js'
+              echo "const RELAY_URL = '$URL';"
+              echo '```'
+              echo "and add \`$URL\` and \`wss://${URL#https://}\` to the \`connect-src\` of the CSP meta tag."
+            else
+              echo "Deployed, but the worker URL was not found in the log. Open Workers & Pages in the Cloudflare dashboard to copy it."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$URL" ]; then
+            sleep 5
+            curl -fsS --retry 5 --retry-delay 3 "$URL/health" && echo
+            echo "TURN endpoint:" && curl -fsS "$URL/turn" | head -c 300 && echo
+          fi

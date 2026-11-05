@@ -38,19 +38,39 @@ Public ntfy.sh is a free shared service. It rate-limits publishers, and its stre
 reconnects. Direct links with STUN alone also fail on many mobile and carrier networks (CGNAT, symmetric NAT). The
 usual symptom is that messages arrive sometimes and not at other times, mostly when the two people are on different networks.
 
-`relay/` is a small Cloudflare Worker with one Durable Object per room. It replaces ntfy.sh as the setup and relay
-channel (a WebSocket with automatic reconnect and keepalive) and hands out short-lived TURN credentials so direct links
-work across strict networks. It only ever forwards sealed envelopes.
+`relay/` is a small Cloudflare Worker with one Durable Object per room. It carries setup and relay-mode traffic over a
+WebSocket (automatic reconnect, keepalive) and hands out short-lived TURN credentials so direct links work across strict
+networks. It only ever forwards sealed envelopes. ntfy.sh stays on as a standby, so neither provider is a single point of failure.
 
-1. `cd relay && npx wrangler deploy`. Note the `https://chatexa-relay.<your-subdomain>.workers.dev` URL it prints.
-2. TURN (optional but strongly recommended): create a TURN key in the Cloudflare dashboard (Realtime, TURN), then
-   `npx wrangler secret put TURN_KEY_ID` and `npx wrangler secret put TURN_KEY_API_TOKEN`.
-3. In `relay/wrangler.jsonc`, set `ALLOWED_ORIGINS` to the origin your page is served from if it is not
-   `https://jijiarc.github.io` (an empty string allows anyone), then deploy again.
-4. In `index.html`, set `RELAY_URL` to the worker URL and add its host to `connect-src` in the CSP meta tag, both as
+### Deploy from GitHub (no terminal)
+
+1. Cloudflare dashboard, My Profile, API Tokens, Create Token, template **Edit Cloudflare Workers**. Copy the token.
+   Copy your **Account ID** from the Workers & Pages overview page.
+2. Optional but strongly recommended: Cloudflare dashboard, Realtime, TURN, create a TURN key. Copy its **Key ID** and **API token**.
+3. GitHub repository, Settings, Secrets and variables, Actions, add these repository secrets:
+   `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and (optional) `TURN_KEY_ID`, `TURN_KEY_API_TOKEN`.
+4. Actions tab, **Deploy relay to Cloudflare**, Run workflow. It deploys `relay/` and sets the TURN secrets. The run
+   summary shows your worker URL and checks `/health` and `/turn`. It runs again by itself whenever `relay/` changes on `main`.
+5. In `index.html`, set `RELAY_URL` to the worker URL and add its host to `connect-src` in the CSP meta tag, both as
    `https://host` and `wss://host`. `node test/core.test.mjs` fails if the two disagree.
+6. If the page is not served from `https://jijiarc.github.io`, set `ALLOWED_ORIGINS` in `relay/wrangler.jsonc` to its origin
+   (an empty string allows any site).
 
-Check it with `https://<worker-url>/health` (prints `ok`) and `https://<worker-url>/turn` (lists STUN, plus TURN once the secrets are set).
+Without the Action: `cd relay && npx wrangler deploy`, then `npx wrangler secret put TURN_KEY_ID` and `TURN_KEY_API_TOKEN`.
+
+### What happens when something fails
+
+| Problem | What the page does |
+| --- | --- |
+| Strict NAT / carrier network blocks a direct link | TURN relays the WebRTC traffic (UDP, TCP or TLS on 443), still end to end encrypted |
+| Direct link still cannot be set up (two attempts) | Automatic mode moves the chat onto the encrypted relay |
+| A working direct link drops (network change, Wi-Fi to mobile) | After 8 seconds of silence the link is discarded and the chat continues on the relay at once |
+| Cloudflare relay unreachable or blocked | ntfy.sh carries setup and chat; both rails are listened to, so either can deliver |
+| Relay connection dies silently (sleeping phone, NAT timeout) | A ping every 20 seconds detects it; the page also checks it when the network comes back or the tab returns to the foreground, then reconnects with backoff |
+| A message is lost in transit, or its confirmation is | Unconfirmed messages are resent every few seconds while they live, from the third attempt on over every rail; repeats are dropped and confirmed again |
+| Offline when sending | The message waits ("waiting for connection") and is sent when the connection is back, as long as it has not expired |
+| Other person reloads or rejoins while you are on the relay | You answer their hello with a relay heartbeat, so they switch to the relay immediately instead of timing out |
+| Both providers down, or both networks blocked | Use **Manual codes**: no server involved |
 
 ## Optional components
 
@@ -70,12 +90,14 @@ Metadata and timing, IP addresses (each side sees the other's in a direct link),
 
 ## Tests
 
-`node test/core.test.mjs` (Node 20+) checks key derivation, encryption and tamper rejection, replay and clock-drift defences, expiry, and that the page has no external scripts and keeps its CSP. CI runs it before every deploy.
+`node test/core.test.mjs` (Node 20+) checks key derivation, encryption and tamper rejection, replay and clock-drift defences, expiry, the relay channels (reconnect, standby routing, failover when a direct link drops, retries), and that the page has no external scripts and keeps its CSP. `node test/relay.test.mjs` checks the Cloudflare worker (routing, origin allowlist, TURN credentials, room behaviour). The `Tests` workflow runs both on every push.
 
 ## Files
 
 - `index.html`: the whole app
 - `relay/worker.js`, `relay/wrangler.jsonc`: optional Cloudflare relay and TURN credentials
+- `.github/workflows/deploy-relay.yml`: deploys the relay from GitHub; `.github/workflows/ci.yml`: runs the tests
+- `test/relay.test.mjs`: tests for the Cloudflare worker
 - `test/core.test.mjs`: tests for the core logic and hosting rules
 - `.github/workflows/pages.yml`: test and deploy
 - `LICENSE`: MIT
