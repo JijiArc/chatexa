@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <meta name="description" content="Search the Archive Genocide public documentation archive by caption, date, source, media type and location.">
+  <title>Memento — Archive Search</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1220;--panel:#111c2e;--panel2:#17243a;--text:#edf3fb;--muted:#9aabc2;--line:#293951;--accent:#a78bfa;--accent2:#7c3aed;--warn:#fbbf24;--danger:#f87171;--ok:#4ade80}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#24314d 0,var(--bg) 55%);color:var(--text);font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}
+    a{color:#c4b5fd}a:hover{color:#fff}.wrap{max-width:1100px;margin:auto;padding:0 20px}
+    .notice{background:#382b16;color:#ffedc2;border-bottom:1px solid #705321;padding:10px 18px;text-align:center;font-size:13px}
+    header{padding:46px 0 28px;text-align:center}.eyebrow{text-transform:uppercase;letter-spacing:.18em;color:var(--accent);font-size:11px;font-weight:700}
+    h1{font-size:clamp(38px,7vw,64px);line-height:1.05;letter-spacing:-.055em;margin:10px 0}.logo-accent{color:var(--accent)}
+    .sub{color:var(--muted);max-width:720px;margin:0 auto 22px}.api-status{display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:6px 12px;color:var(--muted);font-size:12px;margin:0 auto 24px}
+    .dot{width:8px;height:8px;border-radius:50%;background:#64748b}.dot.ok{background:var(--ok)}.dot.bad{background:var(--danger)}
+    .search-panel{background:rgba(17,28,46,.92);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 18px 60px #0005;text-align:left}
+    .search-row{display:flex;gap:10px}.search-row input{flex:1;min-width:0}.field,input,select,button{font:inherit}
+    input,select{background:#0c1627;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%;outline:none}
+    input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px #a78bfa22}
+    .search-row input{font-size:16px;padding:14px 16px}.btn{border:1px solid transparent;border-radius:10px;padding:10px 15px;cursor:pointer;font-weight:650;background:var(--accent2);color:white;white-space:nowrap}
+    .btn:hover{filter:brightness(1.13)}.btn:disabled{opacity:.45;cursor:not-allowed}.btn.secondary{background:var(--panel2);border-color:var(--line);color:var(--text)}.btn.small{font-size:12px;padding:6px 9px}
+    .filters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:12px}.field label{display:block;color:var(--muted);font-size:11px;margin:0 0 5px 2px}
+    .actions{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}.actions-left,.actions-right{display:flex;gap:8px;flex-wrap:wrap}
+    main{padding:12px 0 60px}.toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;color:var(--muted);font-size:13px;margin:20px 2px 12px;flex-wrap:wrap}
+    .results{display:grid;gap:12px}.result{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:16px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;min-width:0}
+    .source{font-size:12px;color:var(--muted);margin-bottom:5px}.result h2{font-size:17px;line-height:1.35;margin:0 0 8px}.result h2 a{text-decoration:none;color:#e9e2ff}.caption{white-space:pre-line;color:#d2dbea;font-size:14px;margin:0 0 10px;overflow-wrap:anywhere}
+    .badges{display:flex;gap:6px;flex-wrap:wrap}.badge{font-size:11px;border:1px solid #34445d;border-radius:999px;padding:3px 8px;color:#c4d0e0;background:#17243a}.badge.warn{border-color:#77551c;color:#ffdc91;background:#352a17}.badge.low{border-color:#713b43;color:#ffc2c2;background:#321e29}
+    .thumb{position:relative;align-self:start;width:100%;aspect-ratio:16/10;border-radius:9px;overflow:hidden;background:#202d40;border:1px solid var(--line);cursor:pointer;padding:0}
+    .thumb img{width:100%;height:100%;object-fit:cover;display:block;filter:blur(18px) grayscale(.45);transition:filter .2s}.thumb.revealed img{filter:none}.thumb .veil{position:absolute;inset:0;display:grid;place-content:center;text-align:center;background:#0005;color:white;font-size:11px;font-weight:700;letter-spacing:.04em}.thumb.revealed .veil{display:none}
+    .thumb.no-image{cursor:default}.thumb.no-image .veil{color:var(--muted);font-weight:500}
+    .result-tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.empty,.error{padding:38px 18px;text-align:center;background:var(--panel);border:1px dashed var(--line);border-radius:14px;color:var(--muted)}
+    .error{color:#fecaca;border-color:#713b43}.pager{display:flex;justify-content:center;align-items:center;gap:12px;margin:20px 0}.pager span{font-size:13px;color:var(--muted)}
+    footer{border-top:1px solid var(--line);padding:22px 0 38px;color:var(--muted);font-size:12px;text-align:center}footer p{margin:5px}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    @media(max-width:800px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}.result{grid-template-columns:minmax(0,1fr) 145px}}
+    @media(max-width:560px){.wrap{padding:0 13px}header{padding:32px 0 18px}.search-row{flex-direction:column}.search-row .btn{width:100%}.filters{grid-template-columns:1fr 1fr}.result{grid-template-columns:1fr}.thumb{width:100%;max-height:210px;aspect-ratio:16/9;grid-row:1}.result h2{font-size:16px}.toolbar{align-items:flex-start}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <div class="notice"><strong>Content advisory:</strong> This archive may contain graphic documentation of violence, death and serious injury. Media previews remain blurred until individually revealed.</div>
+  <header class="wrap">
+    <div class="eyebrow">Public documentation archive</div>
+    <h1>mem<span class="logo-accent">e</span>nto</h1>
+    <p class="sub" id="tagline">Search captions, dates, source collections and geolocated records. Search results are archival records, not legal findings.</p>
+    <div class="api-status" role="status" aria-live="polite"><span class="dot" id="statusDot"></span><span id="apiStatus">Connecting to archive API…</span></div>
+    <section class="search-panel" aria-label="Archive search">
+      <form id="searchForm">
+        <div class="search-row">
+          <label class="sr-only" for="q">Search captions</label>
+          <input id="q" maxlength="200" type="search" placeholder="Search captions in English or Arabic…" autocomplete="off">
+          <button class="btn" id="goBtn" type="submit">Search archive</button>
+        </div>
+        <div class="filters">
+          <div class="field"><label for="typeSel">Media type</label><select id="typeSel"><option value="">All media</option><option value="video">Videos</option><option value="photo">Photos</option></select></div>
+          <div class="field"><label for="archiveSel">Source collection</label><select id="archiveSel"><option value="">All collections</option></select></div>
+          <div class="field"><label for="geoSel">Geolocation</label><select id="geoSel"><option value="">Any location</option><option value="1">Has coordinates</option><option value="0">No coordinates</option></select></div>
+          <div class="field"><label for="fromDate">From date</label><input id="fromDate" type="date"></div>
+          <div class="field"><label for="toDate">To date</label><input id="toDate" type="date"></div>
+        </div>
+        <div class="actions">
+          <div class="actions-left"><button class="btn secondary" id="clearBtn" type="button">Clear filters</button><button class="btn secondary" id="copySearchBtn" type="button">Copy search link</button></div>
+          <div class="actions-right"><button class="btn secondary" id="exportJsonBtn" type="button" disabled>Export JSON</button><button class="btn secondary" id="exportCsvBtn" type="button" disabled>Export CSV</button></div>
+        </div>
+      </form>
+    </section>
+  </header>
+  <main class="wrap">
+    <div class="toolbar"><span id="status" aria-live="polite">Enter a search term or choose a filter to begin.</span><span id="resultCount"></span></div>
+    <section id="results" class="results" aria-live="polite"><div class="empty">Your search results will appear here.</div></section>
+    <nav class="pager" id="pager" aria-label="Search result pages" hidden>
+      <button class="btn secondary" id="prevBtn" type="button">← Previous</button><span id="pageInfo"></span><button class="btn secondary" id="nextBtn" type="button">Next →</button>
+    </nav>
+  </main>
+  <footer><div class="wrap">
+    <p><strong>Data source:</strong> <a href="https://archivegenocide.com" target="_blank" rel="noopener noreferrer">Archive Genocide</a> public read-only API.</p>
+    <p>Verify each record against its original source. Geolocation precision varies; approximate points must not be treated as exact filming locations.</p>
+    <p><a href="https://archivegenocide.com/api-docs/" target="_blank" rel="noopener noreferrer">API documentation</a> · <a href="https://api.archivegenocide.com/openapi.json" target="_blank" rel="noopener noreferrer">OpenAPI specification</a></p>
+  </div></footer>
+<script>
+(() => {
+  "use strict";
+  // Direct API is the primary route. Set PROXY_BASE only if your deployment needs the optional Worker.
+  const CONFIG = Object.freeze({
+    apiBase: "https://api.archivegenocide.com",
+    proxyBase: "", // Example: "https://memento-api.YOUR-SUBDOMAIN.workers.dev"
+    perPage: 50,   // API allows 1–100; 50 is a conservative default.
+    requestTimeoutMs: 20000,
+    userAgentLabel: "MementoArchiveSearch/1.0"
+  });
+  const $ = id => document.getElementById(id);
+  const state = { page: 1, pages: 1, total: 0, results: [], busy: false, activeRoute: "direct", lastParams: null, controller: null };
+  const ALLOWED_TYPES = new Set(["video", "photo"]);
+
+  function setStatus(message) { $("status").textContent = message; }
+  function setApiStatus(message, mode) {
+    $("apiStatus").textContent = message;
+    $("statusDot").className = "dot" + (mode ? " " + mode : "");
+  }
+  function safeText(value) { return value == null ? "" : String(value); }
+  function escapeHtml(value) {
+    return safeText(value).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+  }
+  function safeHttpUrl(value) {
+    try { const u = new URL(value); return (u.protocol === "https:" || u.protocol === "http:") ? u.href : ""; }
+    catch { return ""; }
+  }
+  function formatDate(value) {
+    if (!value) return "Date unavailable";
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? safeText(value) : new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(d);
+  }
+  function apiUrl(path, params) {
+    const base = (state.activeRoute === "worker" ? CONFIG.proxyBase.replace(/\/+$/,"") : CONFIG.apiBase);
+    const url = new URL(state.activeRoute === "worker" ? path.replace(/^\/+/,"") : path.replace(/^/,""), base.endsWith("/") ? base : base + "/");
+    if (params) for (const [key,value] of params.entries()) url.searchParams.append(key,value);
+    return url.href;
+  }
+  async function requestJson(path, params, allowFallback=true) {
+    const routes = ["direct"];
+    if (CONFIG.proxyBase) routes.push("worker");
+    let lastError;
+    for (const route of routes) {
+      state.activeRoute = route;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), CONFIG.requestTimeoutMs);
+      try {
+        const url = apiUrl(path, params);
+        const response = await fetch(url, { method:"GET", mode:"cors", credentials:"omit", cache:"default", signal:controller.signal, headers:{"Accept":"application/json"} });
+        if (!response.ok) {
+          let detail = "";
+          try { const body = await response.json(); detail = body.error || body.message || ""; } catch {}
+          const error = new Error(detail || `API returned HTTP ${response.status}`);
+          error.status = response.status;
+          error.retryAfter = response.headers.get("Retry-After");
+          // A fallback is useful for network/CORS failures, not for API validation/rate-limit responses.
+          if ([400,404,405,410,414,429].includes(response.status)) throw error;
+          throw error;
+        }
+        return await response.json();
+      } catch (error) {
+        lastError = error;
+        if (error.status) throw error;
+        if (route === "direct" && CONFIG.proxyBase && allowFallback) continue;
+      } finally { clearTimeout(timeout); }
+    }
+    throw lastError || new Error("Could not reach the archive API.");
+  }
+  function currentParams() {
+    const p = new URLSearchParams();
+    const q = $("q").value.trim();
+    const type = $("typeSel").value;
+    const archive = $("archiveSel").value;
+    const geo = $("geoSel").value;
+    const from = $("fromDate").value;
+    const to = $("toDate").value;
+    if (q) p.set("q", q);
+    if (type && ALLOWED_TYPES.has(type)) p.set("type", type);
+    if (archive) p.set("archive", archive);
+    if (geo === "1" || geo === "0") p.set("has_geo", geo);
+    if (from) p.set("from", from);
+    if (to) p.set("to", to);
+    p.set("sort", "-date");
+    p.set("page", String(state.page));
+    p.set("per_page", String(CONFIG.perPage));
+    return p;
+  }
+  function hasFilters() {
+    return ["q","typeSel","archiveSel","geoSel","fromDate","toDate"].some(id => $(id).value.trim());
+  }
+  function validateFilters() {
+    if ($("fromDate").value && $("toDate").value && $("fromDate").value > $("toDate").value) {
+      throw new Error("The start date must be on or before the end date.");
+    }
+    if ($("q").value.trim().length > 200) throw new Error("Search text must be 200 characters or fewer.");
+  }
+  function updateUrl() {
+    const url = new URL(location.href);
+    for (const key of ["q","type","archive","has_geo","from","to","page"]) url.searchParams.delete(key);
+    const p = currentParams();
+    for (const key of ["q","type","archive","has_geo","from","to","page"]) if (p.has(key)) url.searchParams.set(key,p.get(key));
+    history.replaceState(null,"",url);
+  }
+  function loadFromUrl() {
+    const p = new URLSearchParams(location.search);
+    $("q").value = p.get("q") || "";
+    $("typeSel").value = ALLOWED_TYPES.has(p.get("type")) ? p.get("type") : "";
+    $("geoSel").value = ["0","1"].includes(p.get("has_geo")) ? p.get("has_geo") : "";
+    $("fromDate").value = /^\d{4}-\d{2}-\d{2}$/.test(p.get("from") || "") ? p.get("from") : "";
+    $("toDate").value = /^\d{4}-\d{2}-\d{2}$/.test(p.get("to") || "") ? p.get("to") : "";
+    state.page = Math.max(1, Math.min(100000, Number.parseInt(p.get("page") || "1",10) || 1));
+    return p.get("archive") || "";
+  }
+  async function bootstrap() {
+    try {
+      const meta = await requestJson("/v1/meta");
+      const data = meta.data || meta;
+      const count = data.clips ?? data.total_clips ?? data.total;
+      setApiStatus(`API connected · ${count != null ? Number(count).toLocaleString() + " records" : "ready"} · ${state.activeRoute}`, "ok");
+      if (count != null) $("tagline").textContent = `Search ${Number(count).toLocaleString()} public archive records by caption, date, source and location.`;
+    } catch (error) {
+      setApiStatus("API connection unavailable · " + error.message, "bad");
+    }
+    try {
+      const payload = await requestJson("/v1/archives");
+      const data = payload.data || payload;
+      const archives = data.results || data.archives || data.items || [];
+      if (Array.isArray(archives)) {
+        for (const item of archives) {
+          const name = typeof item === "string" ? item : (item.name || item.archive || item.id);
+          if (!name) continue;
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = `${name}${item.count ? " (" + Number(item.count).toLocaleString() + ")" : ""}`;
+          $("archiveSel").append(option);
+        }
+      }
+      const requestedArchive = loadRequestedArchive;
+      if (requestedArchive) $("archiveSel").value = requestedArchive;
+      if (hasFilters()) search(state.page);
+    } catch (error) {
+      console.warn("Could not load archive collections:", error);
+      if (hasFilters()) search(state.page);
+    }
+  }
+  let loadRequestedArchive = "";
+
+  function render(clips) {
+    state.results = clips;
+    $("exportJsonBtn").disabled = !clips.length;
+    $("exportCsvBtn").disabled = !clips.length;
+    if (!clips.length) {
+      $("results").innerHTML = '<div class="empty">No matching records. Try broader terms or remove a filter.</div>';
+      return;
+    }
+    $("results").innerHTML = clips.map(clip => {
+      const title = clip.caption ? clip.caption.slice(0,160) : `Archive clip #${clip.id}`;
+      const pageUrl = safeHttpUrl(clip.page_url) || safeHttpUrl(clip.media_url) || "https://archivegenocide.com";
+      const thumb = safeHttpUrl(clip.thumbnail_url);
+      const source = escapeHtml(clip.source_archive || "Archive Genocide");
+      const geo = clip.geo && Number.isFinite(Number(clip.geo.lat)) && Number.isFinite(Number(clip.geo.lon))
+        ? `${Number(clip.geo.lat).toFixed(4)}, ${Number(clip.geo.lon).toFixed(4)} · ${clip.geo.exact === true ? "exact" : "approximate"}`
+        : "";
+      const mapUrl = geo ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(clip.geo.lat)}&mlon=${encodeURIComponent(clip.geo.lon)}#map=15/${encodeURIComponent(clip.geo.lat)}/${encodeURIComponent(clip.geo.lon)}` : "";
+      const badges = [
+        `<span class="badge">${escapeHtml(formatDate(clip.date))}</span>`,
+        `<span class="badge">${escapeHtml(String(clip.type || "record").toUpperCase())}</span>`,
+        clip.confidence ? `<span class="badge ${clip.confidence === "low" ? "low" : ""}">review confidence: ${escapeHtml(clip.confidence)}</span>` : "",
+        geo ? `<span class="badge">${escapeHtml(geo)}</span>` : "",
+        `<span class="badge warn">Content advisory</span>`
+      ].filter(Boolean).join("");
+      const caption = clip.caption ? `<p class="caption">${escapeHtml(clip.caption)}</p>` : "";
+      const thumbnail = thumb
+        ? `<button class="thumb" type="button" aria-label="Reveal blurred media preview"><img loading="lazy" referrerpolicy="no-referrer" src="${escapeHtml(thumb)}" alt=""><span class="veil">⚠ BLURRED PREVIEW<br>CLICK TO REVEAL</span></button>`
+        : `<div class="thumb no-image" aria-label="No preview available"><span class="veil">No preview available</span></div>`;
+      return `<article class="result">
+        <div><div class="source">${source}${clip.id != null ? " · ID " + escapeHtml(clip.id) : ""}</div>
+          <h2><a href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(title)}</a></h2>
+          ${caption}<div class="badges">${badges}</div>
+          <div class="result-tools"><a class="btn small secondary" href="${escapeHtml(pageUrl)}" target="_blank" rel="noopener noreferrer">Open archive record ↗</a>
+          ${mapUrl ? `<a class="btn small secondary" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">View map ↗</a>` : ""}
+          <button class="btn small secondary copy-citation" type="button">Copy citation</button></div>
+        </div>${thumbnail}</article>`;
+    }).join("");
+    $("results").querySelectorAll(".thumb:not(.no-image)").forEach(button => button.addEventListener("click", () => {
+      button.classList.add("revealed");
+      button.setAttribute("aria-label","Media preview revealed");
+    }, {once:true}));
+    $("results").querySelectorAll(".copy-citation").forEach((button,index) => button.addEventListener("click", async () => {
+      const c = clips[index];
+      const citation = `${c.source_archive || "Archive Genocide"}, clip #${c.id ?? "unknown"}, ${c.date || "date unavailable"}. ${c.page_url || ""}`.trim();
+      try { await navigator.clipboard.writeText(citation); button.textContent = "Copied"; }
+      catch { button.textContent = "Clipboard unavailable"; }
+    }));
+  }
+  async function search(page=1) {
+    if (state.busy) state.controller?.abort();
+    state.page = Math.max(1,page);
+    try { validateFilters(); }
+    catch (error) { setStatus(error.message); $("results").innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`; return; }
+    if (!hasFilters()) {
+      state.total = 0; state.results = []; $("resultCount").textContent = "";
+      $("pager").hidden = true; $("exportJsonBtn").disabled = $("exportCsvBtn").disabled = true;
+      $("results").innerHTML = '<div class="empty">Enter a search term or choose at least one filter to begin.</div>';
+      setStatus("Ready for a search."); return;
+    }
+    state.busy = true;
+    $("goBtn").disabled = true;
+    setStatus("Searching the archive…");
+    $("results").innerHTML = '<div class="empty">Searching…</div>';
+    $("pager").hidden = true;
+    const params = currentParams();
+    state.lastParams = new URLSearchParams(params);
+    updateUrl();
+    try {
+      const payload = await requestJson("/v1/clips",params);
+      const data = payload.data || payload;
+      const clips = data.results || data.items || data.clips || [];
+      state.total = Number(data.total ?? data.total_results ?? clips.length);
+      state.pages = Math.max(1, Number(data.pages || Math.ceil(state.total / Number(data.per_page || CONFIG.perPage)) || 1));
+      render(Array.isArray(clips) ? clips : []);
+      $("resultCount").textContent = `${Number(state.total).toLocaleString()} results${data.total_is_lower_bound ? " (lower bound; refine by date for deeper searches)" : ""}`;
+      $("pager").hidden = state.pages <= 1;
+      $("prevBtn").disabled = state.page <= 1;
+      $("nextBtn").disabled = state.page >= state.pages;
+      $("pageInfo").textContent = `Page ${state.page.toLocaleString()} of ${state.pages.toLocaleString()}`;
+      setStatus(`Showing ${clips.length} records · connected via ${state.activeRoute}.`);
+    } catch (error) {
+      let message = error.message || "Search failed.";
+      if (error.status === 429) message += ` Please wait ${error.retryAfter || "a short time"} seconds before retrying.`;
+      if (error.status === 503) message += " The archive is busy; try again shortly or narrow the search.";
+      $("results").innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
+      setStatus("Search could not be completed.");
+    } finally {
+      state.busy = false; $("goBtn").disabled = false;
+    }
+  }
+  function downloadFile(name, content, type) {
+    const blob = new Blob([content],{type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href=url; a.download=name; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  function csvCell(value) { const s = value == null ? "" : String(value); return `"${s.replace(/"/g,'""')}"`; }
+  function exportData(format) {
+    if (!state.results.length) return;
+    if (format === "json") downloadFile("memento-results.json",JSON.stringify({exported_at:new Date().toISOString(),source:"Archive Genocide",results:state.results},null,2),"application/json");
+    else {
+      const cols = ["id","date","type","source_archive","confidence","caption","caption_original","latitude","longitude","geo_exact","page_url","source_post","media_url"];
+      const rows = state.results.map(c => [c.id,c.date,c.type,c.source_archive,c.confidence,c.caption,c.caption_original,c.geo?.lat,c.geo?.lon,c.geo?.exact,c.page_url,c.source_post,c.media_url]);
+      downloadFile("memento-results.csv",[cols,...rows].map(row=>row.map(csvCell).join(",")).join("\r\n"),"text/csv;charset=utf-8");
+    }
+  }
+  $("searchForm").addEventListener("submit",event=>{event.preventDefault();search(1);});
+  $("clearBtn").addEventListener("click",()=>{$("searchForm").reset();state.page=1;history.replaceState(null,"",location.pathname);search(1);});
+  $("prevBtn").addEventListener("click",()=>search(state.page-1));
+  $("nextBtn").addEventListener("click",()=>search(state.page+1));
+  $("exportJsonBtn").addEventListener("click",()=>exportData("json"));
+  $("exportCsvBtn").addEventListener("click",()=>exportData("csv"));
+  $("copySearchBtn").addEventListener("click",async()=>{updateUrl();try{await navigator.clipboard.writeText(location.href);setStatus("Search link copied.");}catch{setStatus("Copy unavailable; copy the address bar URL.");}});
+  // Filter changes submit immediately; text search remains explicit to avoid excessive API calls.
+  ["typeSel","archiveSel","geoSel","fromDate","toDate"].forEach(id=>$(id).addEventListener("change",()=>search(1)));
+  loadRequestedArchive = loadFromUrl();
+  bootstrap();
+})();
+</script>
+</body>
+</html>
