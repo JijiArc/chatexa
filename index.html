@@ -390,15 +390,35 @@ const STUN_URLS = ['stun:stun.cloudflare.com:3478'];
  *   [{ urls: 'turn:turn.example.org:3478', username: 'user', credential: 'pass' }]
  * Anything written here is readable by everyone who opens the page, so use a throwaway account. */
 const EXTRA_ICE_SERVERS = [];
+/* Your Cloudflare relay (see relay/ and the README), for example 'https://chatexa-relay.your-name.workers.dev'.
+ * When set it replaces ntfy.sh for setup and for relay mode, and also hands out TURN credentials so direct links
+ * work across strict NATs. Leave it empty to keep using public ntfy.sh. If you set it, add the same host to the
+ * connect-src part of the CSP meta tag (both https:// and wss://); the tests check that. */
+const RELAY_URL = '';
 const SIG_CHUNK = 3000;                  // ntfy messages are limited to 4096 bytes
-const HELLO_STEPS = [3000, 6000, 12000, 30000];   // announce quickly, then back off                   // ntfy.sh rate-limits publishers, so keep this slow
+const HELLO_STEPS = [3000, 6000, 12000, 30000];   // announce quickly, then back off (ntfy.sh rate-limits publishers)
 const CONNECT_TIMEOUT_MS = 20000;
 const MANUAL_MAX_MS = 10 * 60 * 1000;
 const SIGNAL_MAX_AGE_SEC = 30;
 
 let useStun = true;   // set from the checkbox at join time
+let turnServers = []; // short-lived STUN/TURN servers fetched from the relay worker, if one is configured
 
-function iceConfig() { return { iceServers: [...(useStun ? [{ urls: STUN_URLS }] : []), ...EXTRA_ICE_SERVERS] }; }
+function iceConfig() {
+  const base = turnServers.length ? turnServers : [{ urls: STUN_URLS }];
+  return { iceServers: [...(useStun ? base : []), ...EXTRA_ICE_SERVERS] };
+}
+/* Ask the relay worker for TURN credentials. Any failure just means STUN only, as before. */
+async function loadTurn() {
+  turnServers = [];
+  if (!RELAY_URL || !useStun) return;
+  try {
+    const r = await fetch(RELAY_URL.replace(/\/+$/, '') + '/turn', { cache: 'no-store', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && Array.isArray(j.iceServers) && j.iceServers.length <= 4) turnServers = j.iceServers.filter(s => s && s.urls);
+  } catch (e) { /* STUN only */ }
+}
 
 function gathered(pc, ms) {
   return new Promise(res => {
@@ -415,7 +435,8 @@ function gathered(pc, ms) {
 function newLink(cb) {
   const pc = new RTCPeerConnection(iceConfig());
   const L = { pc, dc: null, dead: false };
-  const down = () => { if (!L.dead) { L.dead = true; cb.onDown(L); } };
+  let dropTimer = null;
+  const down = () => { clearTimeout(dropTimer); if (!L.dead) { L.dead = true; cb.onDown(L); } };
   const attach = dc => {
     L.dc = dc;
     dc.onopen = () => cb.onUp(L);
@@ -428,10 +449,17 @@ function newLink(cb) {
     };
   };
   pc.ondatachannel = e => attach(e.channel);
-  pc.onconnectionstatechange = () => { const s = pc.connectionState; if (s === 'failed' || s === 'closed') down(); };
+  /* 'disconnected' often heals by itself (a Wi-Fi blip), but a dead path can sit in it for a long time while the data
+   * channel still looks open and messages vanish. Give it 8 seconds, then treat the link as down and reconnect. */
+  pc.onconnectionstatechange = () => {
+    const s = pc.connectionState;
+    clearTimeout(dropTimer);
+    if (s === 'failed' || s === 'closed') down();
+    else if (s === 'disconnected') dropTimer = setTimeout(down, 8000);
+  };
   L.makeChannel = () => attach(pc.createDataChannel('chat'));
   L.isOpen = () => !!L.dc && L.dc.readyState === 'open';
-  L.close = () => { L.dead = true; try { if (L.dc) L.dc.close(); } catch (e) { /* gone */ } try { pc.close(); } catch (e) { /* gone */ } };
+  L.close = () => { L.dead = true; clearTimeout(dropTimer); try { if (L.dc) L.dc.close(); } catch (e) { /* gone */ } try { pc.close(); } catch (e) { /* gone */ } };
   return L;
 }
 function offline() { const e = new Error('offline'); e.code = 'offline'; return e; }
@@ -454,14 +482,16 @@ function makeClaudeTransport(roomNs, roomId) {
   return t;
 }
 
-/* --- Transport B: WebRTC data channel, set up through the ntfy relay ---
- * The relay carries only AES-GCM sealed setup messages (hello / offer / answer) on a topic derived from
- * the password. Once the channel is open the relay connection is closed and chat flows browser to browser.
- * Both sides announce themselves; the one with the smaller session id makes the offer, which avoids clashes. */
-function makeP2PTransport(roomId, getKey, getSession, opts) {
+/* --- Signaling channels ---
+ * A channel carries sealed envelopes between the two browsers: setup messages (hello / offer / answer) and,
+ * in relay mode, the chat itself. Two implementations: the Cloudflare relay in relay/ (RELAY_URL set) or public ntfy.sh.
+ *   start()  begin listening (idempotent)      stop()  close for good until start() is called again
+ *   post(env)  async, throws {code} when it cannot send      up()  true when a post would go out right now
+ * Callbacks: cb.onEnv(env) for every complete envelope, cb.onState(up) when a persistent channel connects or drops,
+ * cb.onFail(code) for a channel that cannot recover by itself. */
+function makeNtfyChannel(roomId, cb) {
   const base = NTFY_SERVER.replace(/\/+$/, '') + '/sr-' + roomId;
-  const t = { name: 'p2p', state: 'waiting', link: null, peer: null, role: null, closed: false, relay: false };
-  let h = null, es = null, helloTimer = null, connectTimer = null, lastReply = 0, fails = 0;
+  let es = null;
   const chunks = new Map();
 
   /* Publish one sealed envelope to the relay topic, split into chunks that fit its message limit. */
@@ -474,70 +504,6 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
       if (!r.ok) { const e = new Error('relay'); e.code = 'relay_' + r.status; throw e; }
     }
   }
-  async function sig(obj) {
-    const k = getKey();
-    if (!k) return;
-    await post(await seal(k, obj));
-  }
-  const hello = r => sig({ t: 'hello', from: getSession(), sentAt: Date.now(), r: r ? 1 : 0 });
-
-  function listen() {
-    if (es || t.closed) return;
-    es = new EventSource(base + '/sse');
-    es.onmessage = ev => onSse(ev.data);
-    es.onerror = () => { if (es && es.readyState === 2) { h.onError({ code: 'relay_closed' }); } };
-  }
-  function stopSignaling() {
-    clearTimeout(helloTimer); helloTimer = null;
-    clearTimeout(connectTimer); connectTimer = null;
-    if (es) { es.close(); es = null; }
-    chunks.clear();
-  }
-  function startHello() {
-    clearTimeout(helloTimer);
-    let i = 0;
-    const go = () => {
-      if (t.closed || t.relay || t.state !== 'waiting') return;
-      hello(true).catch(() => h.onError({ code: 'relay_unreachable' }));
-      helloTimer = setTimeout(go, HELLO_STEPS[Math.min(i++, HELLO_STEPS.length - 1)]);
-    };
-    go();
-  }
-  function armTimeout() {
-    clearTimeout(connectTimer);
-    connectTimer = setTimeout(() => { if (t.state === 'connecting' && !(t.link && t.link.isOpen())) reset(); }, CONNECT_TIMEOUT_MS);
-  }
-  /* Relay mode: the same sealed chat envelopes are published on the relay topic instead of a data channel. */
-  function enterRelay(announce) {
-    if (t.relay || t.closed) return;
-    if (t.link) { t.link.close(); t.link = null; }
-    clearTimeout(helloTimer); helloTimer = null;
-    clearTimeout(connectTimer); connectTimer = null;
-    t.relay = true; t.state = 'connected'; t.peer = null; t.role = null;
-    listen();
-    if (announce) h.onError({ code: 'relay_fallback' });
-    h.onUp(true);
-  }
-  function reset() {
-    if (t.closed || t.relay) return;
-    const failed = t.state === 'connecting';
-    if (t.link) { t.link.close(); t.link = null; }
-    t.peer = null; t.role = null; t.state = 'waiting';
-    if (failed && opts.fallback && ++fails >= 2) { enterRelay(true); return; }   // two failed attempts: give up on direct
-    h.onUp(false);
-    listen(); startHello();
-  }
-  function mkLink() {
-    if (t.link) t.link.close();
-    const L = newLink({
-      onUp: l => { if (t.link === l) { t.state = 'connected'; stopSignaling(); h.onUp(true); } },
-      onEnv: env => h.onEnv(env),
-      onDown: l => { if (t.link === l) reset(); }
-    });
-    t.link = L;
-    return L;
-  }
-
   function onSse(raw) {
     let j;
     try { j = JSON.parse(raw); } catch (e) { return; }
@@ -559,7 +525,155 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
     chunks.delete(id);
     let env;
     try { env = JSON.parse(c.parts.join('')); } catch (e) { return; }
-    handleSignal(env);
+    cb.onEnv(env);
+  }
+  return {
+    name: 'ntfy',
+    start() {
+      if (es) return;
+      /* since=20s replays what was published just before we connected, so an offer sent while this side was
+       * still opening its stream is not lost. Replays are harmless: setup messages expire and chat ids are deduped. */
+      es = new EventSource(base + '/sse?since=20s');
+      es.onmessage = ev => onSse(ev.data);
+      es.onerror = () => { if (es && es.readyState === 2) cb.onFail('relay_closed'); };
+    },
+    stop() { if (es) { es.close(); es = null; } chunks.clear(); },
+    post,
+    up: () => !!es
+  };
+}
+
+/* WebSocket to the Durable Object relay. Reconnects by itself with jittered backoff and detects a silently dead
+ * connection (mobile network switch, NAT timeout) with a ping every 20 seconds. */
+function makeWsChannel(roomId, cb) {
+  const url = RELAY_URL.replace(/^http/, 'ws').replace(/\/+$/, '') + '/ws?room=' + roomId;
+  let ws = null, closed = true, retry = 0, retryTimer = null, pingTimer = null, lastRx = 0, warned = false;
+
+  function stopPing() { clearInterval(pingTimer); pingTimer = null; }
+  function startPing() {
+    stopPing();
+    pingTimer = setInterval(() => {
+      if (!ws || ws.readyState !== 1) return;
+      if (Date.now() - lastRx > 50000) { try { ws.close(); } catch (e) { /* gone */ } return; }   // no pong: dead link
+      try { ws.send('ping'); } catch (e) { /* closing */ }
+    }, 20000);
+  }
+  function schedule() {
+    if (closed || retryTimer) return;
+    const delay = Math.min(15000, 500 * Math.pow(2, retry++)) * (0.7 + Math.random() * 0.6);
+    retryTimer = setTimeout(() => { retryTimer = null; open(); }, delay);
+    if (retry >= 5 && !warned) { warned = true; cb.onFail('relay_unreachable'); }
+  }
+  function open() {
+    if (closed || ws) return;
+    let s;
+    try { s = new WebSocket(url); } catch (e) { schedule(); return; }
+    ws = s;
+    s.onopen = () => { if (ws !== s) return; retry = 0; warned = false; lastRx = Date.now(); startPing(); cb.onState(true); };
+    s.onmessage = ev => {
+      if (ws !== s) return;
+      lastRx = Date.now();
+      if (typeof ev.data !== 'string' || ev.data === 'pong' || ev.data.length > 24000) return;
+      let env;
+      try { env = JSON.parse(ev.data); } catch (e) { return; }
+      cb.onEnv(env);
+    };
+    s.onclose = () => {
+      if (ws !== s) return;
+      ws = null; stopPing();
+      cb.onState(false);
+      schedule();
+    };
+    s.onerror = () => { try { s.close(); } catch (e) { /* gone */ } };
+  }
+  return {
+    name: 'ws',
+    start() { if (!closed) return; closed = false; retry = 0; warned = false; open(); },
+    stop() {
+      closed = true;
+      clearTimeout(retryTimer); retryTimer = null; stopPing();
+      if (ws) { const s = ws; ws = null; try { s.close(); } catch (e) { /* gone */ } }
+    },
+    async post(env) {
+      if (!ws || ws.readyState !== 1) throw offline();
+      ws.send(JSON.stringify(env));
+    },
+    up: () => !!ws && ws.readyState === 1
+  };
+}
+
+/* --- Transport B: WebRTC data channel, set up through a relay (Cloudflare worker or ntfy) ---
+ * The relay carries only AES-GCM sealed setup messages (hello / offer / answer) on a topic derived from
+ * the password. Once the channel is open the relay connection is closed and chat flows browser to browser.
+ * Both sides announce themselves; the one with the smaller session id makes the offer, which avoids clashes. */
+function makeP2PTransport(roomId, getKey, getSession, opts) {
+  const t = { name: 'p2p', state: 'waiting', link: null, peer: null, role: null, closed: false, relay: false };
+  let h = null, helloTimer = null, connectTimer = null, lastReply = 0, fails = 0;
+  const chan = (RELAY_URL ? makeWsChannel : makeNtfyChannel)(roomId, {
+    onEnv: env => handleSignal(env),
+    onState: up => {
+      if (t.closed) return;
+      if (t.relay) h.onUp(up);                              // relay mode: the app re-announces itself when we are back
+      else if (up && t.state === 'waiting') startHello();   // setup mode: announce again as soon as the relay is reachable
+    },
+    onFail: code => { if (!t.closed) h.onError({ code }); }
+  });
+
+  async function sig(obj) {
+    const k = getKey();
+    if (!k) return;
+    await chan.post(await seal(k, obj));
+  }
+  const hello = r => sig({ t: 'hello', from: getSession(), sentAt: Date.now(), r: r ? 1 : 0 });
+
+  function stopSignaling() {
+    clearTimeout(helloTimer); helloTimer = null;
+    clearTimeout(connectTimer); connectTimer = null;
+    chan.stop();
+  }
+  function startHello() {
+    clearTimeout(helloTimer);
+    let i = 0;
+    const go = () => {
+      if (t.closed || t.relay || t.state !== 'waiting') return;
+      if (chan.up()) hello(true).catch(() => h.onError({ code: 'relay_unreachable' }));
+      helloTimer = setTimeout(go, HELLO_STEPS[Math.min(i++, HELLO_STEPS.length - 1)]);
+    };
+    go();
+  }
+  function armTimeout() {
+    clearTimeout(connectTimer);
+    connectTimer = setTimeout(() => { if (t.state === 'connecting' && !(t.link && t.link.isOpen())) reset(); }, CONNECT_TIMEOUT_MS);
+  }
+  /* Relay mode: the same sealed chat envelopes are published on the relay instead of a data channel. */
+  function enterRelay(announce) {
+    if (t.relay || t.closed) return;
+    if (t.link) { t.link.close(); t.link = null; }
+    clearTimeout(helloTimer); helloTimer = null;
+    clearTimeout(connectTimer); connectTimer = null;
+    t.relay = true; t.state = 'connected'; t.peer = null; t.role = null;
+    chan.start();
+    if (announce) h.onError({ code: 'relay_fallback' });
+    h.onUp(true);
+  }
+  function reset() {
+    if (t.closed || t.relay) return;
+    const failed = t.state === 'connecting';
+    if (t.link) { t.link.close(); t.link = null; }
+    t.peer = null; t.role = null; t.state = 'waiting';
+    if (failed && opts.fallback && ++fails >= 2) { enterRelay(true); return; }   // two failed attempts: give up on direct
+    h.onUp(false);
+    chan.start(); startHello();
+  }
+  function mkLink() {
+    if (t.link) t.link.close();
+    const L = newLink({
+      onUp: l => { if (t.link === l) { fails = 0; t.state = 'connected'; stopSignaling(); h.onUp(true); } },
+      onEnv: env => h.onEnv(env),
+      onDown: l => { if (t.link === l) reset(); }
+    });
+    t.link = L;
+    return L;
   }
 
   async function handleSignal(env) {
@@ -620,11 +734,11 @@ function makeP2PTransport(roomId, getKey, getSession, opts) {
     try { await t.link.pc.setRemoteDescription({ type: 'answer', sdp }); } catch (e) { reset(); }
   }
 
-  t.open = async handlers => { h = handlers; if (opts.relayOnly) { enterRelay(false); return; } listen(); startHello(); };
-  t.connected = () => (t.relay ? !!es : !!(t.link && t.link.isOpen()));
+  t.open = async handlers => { h = handlers; if (opts.relayOnly) { enterRelay(false); return; } chan.start(); startHello(); };
+  t.connected = () => (t.relay ? chan.up() : !!(t.link && t.link.isOpen()));
   t.send = async env => {
     if (!t.connected()) throw offline();
-    if (t.relay) await post(env); else t.link.dc.send(JSON.stringify(env));
+    if (t.relay) await chan.post(env); else t.link.dc.send(JSON.stringify(env));
   };
   t.close = () => { t.closed = true; stopSignaling(); if (t.link) { t.link.close(); t.link = null; } };
   return t;
@@ -781,6 +895,7 @@ async function joinRoom() {
   try { k = await deriveKeys(el.pw.value); }
   catch (e) { setJoin('This browser could not derive keys. Use a current browser over HTTPS.', 'bad'); doneJoining(); return; }
   resetPasswordField();
+  if (useMode === 'p2p' && !p2pOpts.relayOnly) { setJoin('Preparing the connection…'); await loadTurn(); }
   key = k.key; roomId = k.roomId; sessionId = newId();
   lastActivity = Date.now();
   const getKey = () => key, getSession = () => sessionId;
@@ -827,7 +942,7 @@ function onTransportError(e) {
     el.modeTag.textContent = RELAY_TAG;
     return;
   }
-  if (c === 'relay_unreachable') notice('Cannot reach the ntfy relay. Check your connection, or use Manual codes.');
+  if (c === 'relay_unreachable') notice('Cannot reach the relay. Check your connection, or use Manual codes.');
   else notice('Lost the connection to the platform' + (c ? ' (' + c + ')' : '') + '. Lock and rejoin to try again.');
 }
 
