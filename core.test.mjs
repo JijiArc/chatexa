@@ -75,13 +75,64 @@ await ok('password guidance', () => {
   assert.equal(api.assessPassword('correct horse battery staple').ok, true);
   assert.equal(api.assessPassword('').empty, true);
 });
-await ok('static-hosting rules: no external scripts, CSP present, only ntfy allowed', () => {
+await ok('static-hosting rules: no external scripts, CSP present, only the relay hosts allowed', () => {
   assert.ok(!/<script[^>]+src=/i.test(html), 'external script found');
   assert.ok(!/<link[^>]+href=["']https?:/i.test(html), 'external stylesheet found');
   const csp = html.match(/Content-Security-Policy" content="([^"]+)"/);
   assert.ok(csp, 'CSP meta missing');
   assert.match(csp[1], /default-src 'none'/);
-  assert.match(csp[1], /connect-src https:\/\/ntfy\.sh/);
+  assert.match(csp[1], /connect-src[^;]*https:\/\/ntfy\.sh/);
+  const connect = csp[1].match(/connect-src ([^;]+)/)[1];
+  assert.ok(!/\*/.test(connect), 'connect-src must not use wildcards');
+});
+await ok('RELAY_URL, when set, is allowed by the CSP over https and wss', () => {
+  const relay = html.match(/const RELAY_URL = '([^']*)'/);
+  assert.ok(relay, 'RELAY_URL constant missing');
+  if (!relay[1]) return;                                   // empty: the page uses ntfy.sh only
+  const u = new URL(relay[1]);
+  assert.equal(u.protocol, 'https:', 'RELAY_URL must be https');
+  const connect = html.match(/Content-Security-Policy" content="[^"]*connect-src ([^;"]+)/)[1].split(/\s+/);
+  assert.ok(connect.includes('https://' + u.host), 'CSP connect-src lacks https://' + u.host);
+  assert.ok(connect.includes('wss://' + u.host), 'CSP connect-src lacks wss://' + u.host);
+});
+
+/* The WebSocket relay channel: reconnects after a drop, never reconnects after stop(), and does not queue sends while down. */
+const chanSrc = html.match(/function makeWsChannel[\s\S]*?\n}\n/)[0];
+await ok('ws channel reconnects with backoff, stops cleanly, refuses to send while down', async () => {
+  const sockets = [];
+  class FakeWS {
+    constructor(url) { this.url = url; this.readyState = 0; this.sent = []; sockets.push(this); }
+    send(d) { this.sent.push(d); }
+    close() { if (this.readyState === 3) return; this.readyState = 3; if (this.onclose) this.onclose(); }
+    open() { this.readyState = 1; this.onopen(); }
+  }
+  const states = [], got = [];
+  const make = new Function('RELAY_URL', 'WebSocket', 'offline', chanSrc + '\nreturn makeWsChannel;')(
+    'https://relay.example.workers.dev', FakeWS, () => Object.assign(new Error('offline'), { code: 'offline' }));
+  const ch = make('a'.repeat(32), { onEnv: e => got.push(e), onState: up => states.push(up), onFail: () => {} });
+  assert.equal(ch.up(), false);
+  await assert.rejects(ch.post({ x: 1 }), { code: 'offline' });
+  ch.start();
+  assert.equal(sockets.length, 1);
+  assert.equal(sockets[0].url, 'wss://relay.example.workers.dev/ws?room=' + 'a'.repeat(32));
+  sockets[0].open();
+  assert.equal(ch.up(), true);
+  await ch.post({ iv: 'i', ct: 'c' });
+  assert.deepEqual(JSON.parse(sockets[0].sent[0]), { iv: 'i', ct: 'c' });
+  sockets[0].onmessage({ data: 'pong' });
+  sockets[0].onmessage({ data: JSON.stringify({ iv: 'x', ct: 'y' }) });
+  assert.deepEqual(got, [{ iv: 'x', ct: 'y' }]);
+  sockets[0].close();                                      // network drop
+  assert.equal(ch.up(), false);
+  assert.deepEqual(states, [true, false]);
+  await new Promise(r => setTimeout(r, 1000));             // first retry is due within ~0.85s at most
+  assert.equal(sockets.length, 2, 'did not reconnect');
+  sockets[1].open();
+  assert.deepEqual(states, [true, false, true]);
+  ch.stop();
+  assert.equal(ch.up(), false);
+  await new Promise(r => setTimeout(r, 1200));
+  assert.equal(sockets.length, 2, 'reconnected after stop()');
 });
 
 console.log(`\n${n} checks passed`);
