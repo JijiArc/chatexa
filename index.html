@@ -109,6 +109,13 @@ select.input { padding: 11px 14px; }
 .send { flex: none; width: 50px; min-height: 50px; border: 0; border-radius: 12px; background: var(--moon); color: var(--moon-ink); font-size: 20px; cursor: pointer; }
 .send:hover { filter: brightness(1.06); }
 .foot { margin: 0; font-size: 12px; color: var(--ink-dim); }
+/* site nav: links to the companion pages in pages/ */
+.sitenav { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+.sitenav .brand { margin-right: auto; font-weight: 700; letter-spacing: .3px; color: var(--ink); text-decoration: none; }
+.sitenav .brand span { color: var(--moon); }
+.sitenav a.link { color: var(--ink-dim); text-decoration: none; padding: 6px 12px; border-radius: 10px; min-height: 32px; }
+.sitenav a.link:hover { background: var(--sky-1); color: var(--ink); }
+.sitenav a.link.active { background: var(--sky-1); color: var(--moon); }
 @media (prefers-reduced-motion: reduce) { .msg { animation: none; transition: none; } }
 @media (max-width: 400px) { .msg { max-width: 92%; } }
 @media (max-height: 520px) {
@@ -121,6 +128,12 @@ select.input { padding: 11px 14px; }
 </head>
 <body>
 <main class="app" id="app">
+  <nav class="sitenav" aria-label="Site">
+    <a class="brand" href="index.html">Secret<span>Room</span></a>
+    <a class="link active" href="index.html" aria-current="page">One-to-one</a>
+    <a class="link" href="pages/Group.html">Group</a>
+    <a class="link" href="pages/sharing.html">File Vault</a>
+  </nav>
   <section class="lock" id="lock" aria-labelledby="title">
     <h1 id="title">Secret Room</h1>
     <p class="lede">Two people, one shared password. Messages are encrypted in your browser, travel directly between the two of you, and vanish after the time you pick, up to 75 seconds.</p>
