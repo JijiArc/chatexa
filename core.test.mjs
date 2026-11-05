@@ -1,12 +1,12 @@
-// Run with: node core.test.mjs   (Node 20+; also works from a test/ folder)
+// Run with: node core.test.mjs (Node 20+; also works from a test/ folder)
 // Extracts the pure core, the relay channels and the vault format from the pages and checks them.
 import { readFileSync, existsSync } from 'node:fs';
 import assert from 'node:assert/strict';
 
 const root = existsSync(new URL('./index.html', import.meta.url)) ? './' : '../';
 const html = readFileSync(new URL(root + 'index.html', import.meta.url), 'utf8');
-const vaultHtml = readFileSync(new URL(root + 'pages/sharing.html', import.meta.url), 'utf8');
-const searchHtml = readFileSync(new URL(root + 'pages/search.html', import.meta.url), 'utf8');
+const vaultHtml = readFileSync(new URL(root + 'sharing.html', import.meta.url), 'utf8');
+const searchHtml = readFileSync(new URL(root + 'search.html', import.meta.url), 'utf8');
 const block = (src, name) => {
   const r = src.match(new RegExp('/\\* ' + name + '-BEGIN \\*/([\\s\\S]*?)/\\* ' + name + '-END \\*/'));
   assert.ok(r, name + ' block not found');
@@ -113,7 +113,7 @@ await ok('every MQTT broker is wss and allowed by the CSP', () => {
   }
 });
 await ok('every vault upload host is allowed by the vault CSP', () => {
-  const urls = [...vaultHtml.matchAll(/url:"(https:\/\/[^"]+)"/g)].map(x => x[1]);
+  const urls = [...vaultHtml.matchAll(/url:"(https:\/\/[^\"]+)"/g)].map(x => x[1]);
   assert.ok(urls.length > 0, 'no upload host configured');
   const connect = connectOf(vaultHtml);
   for (const u of urls) assert.ok(connect.includes(new URL(u).origin), 'vault CSP connect-src lacks ' + new URL(u).origin);
@@ -125,7 +125,7 @@ await ok('no Cloudflare Worker or account-bound storage is referenced any more',
   assert.ok(!re.test(searchHtml), 'search.html still references a Worker proxy');
 });
 await ok('search CORS fallbacks are https and carry the target as an encoded parameter', () => {
-  const wraps = [...searchHtml.matchAll(/wrap: url => "(https:\/\/[^"]+)" \+ encodeURIComponent\(url\)/g)];
+  const wraps = [...searchHtml.matchAll(/wrap: url => "(https:\/\/[^\"]+)" \+ encodeURIComponent\(url\)/g)];
   assert.ok(wraps.length >= 1, 'no open CORS proxy configured');
 });
 
@@ -186,14 +186,14 @@ await ok('MQTT channel: handshake, subscribe, publish, receive, reconnect, stop'
   assert.equal(sockets[0].proto, 'mqtt');
   sockets[0].open();
 
-  const connect = sockets[0].sent[0];                      // CONNECT: 10 <len> 00 04 'MQTT' 04 02 00 1E <clientId>
+  const connect = sockets[0].sent[0];
   assert.equal(connect[0], 0x10);
   assert.deepEqual([...connect.subarray(2, 14)], [0, 4, 0x4d, 0x51, 0x54, 0x54, 4, 2, 0, 30, 0, 18]);
   assert.equal(connect[1], connect.length - 2);
   assert.match(text(connect.subarray(14)), /^cx[0-9a-f]{16}$/);
 
-  sockets[0].recv([0x20, 2, 0, 0]);                        // CONNACK accepted
-  const sub = sockets[0].sent[1];                          // SUBSCRIBE, QoS 0, our topic only
+  sockets[0].recv([0x20, 2, 0, 0]);
+  const sub = sockets[0].sent[1];
   assert.equal(sub[0], 0x82);
   assert.equal(sub[1], sub.length - 2);
   assert.deepEqual([sub[2], sub[3]], [0, 1]);
@@ -201,7 +201,7 @@ await ok('MQTT channel: handshake, subscribe, publish, receive, reconnect, stop'
   assert.equal(text(sub.subarray(6, 6 + topic.length)), topic);
   assert.equal(sub[sub.length - 1], 0);
   assert.equal(ch.up(), false, 'not up before SUBACK');
-  sockets[0].recv([0x90, 3, 0, 1, 0]);                     // SUBACK granted
+  sockets[0].recv([0x90, 3, 0, 1, 0]);
   assert.equal(ch.up(), true);
   assert.deepEqual(states, [true]);
 
@@ -212,15 +212,15 @@ await ok('MQTT channel: handshake, subscribe, publish, receive, reconnect, stop'
   assert.deepEqual(JSON.parse(text(pub.subarray(4 + topic.length))), { iv: 'i', ct: 'c' });
 
   sockets[0].recv(inbound(topic, { iv: 'x', ct: 'y' }));
-  sockets[0].recv(inbound('someone/else', { iv: 'no', ct: 'no' }));          // other topics are ignored
+  sockets[0].recv(inbound('someone/else', { iv: 'no', ct: 'no' }));
   const split = inbound(topic, { iv: 'p', ct: 'q' });
-  sockets[0].recv(split.slice(0, 7)); sockets[0].recv(split.slice(7));       // one packet in two messages
+  sockets[0].recv(split.slice(0, 7)); sockets[0].recv(split.slice(7));
   assert.deepEqual(got, [{ iv: 'x', ct: 'y' }, { iv: 'p', ct: 'q' }]);
 
-  sockets[0].close();                                      // network drop
+  sockets[0].close();
   assert.equal(ch.up(), false);
   assert.deepEqual(states, [true, false]);
-  await new Promise(r => setTimeout(r, 1000));             // first retry is due within ~0.65s
+  await new Promise(r => setTimeout(r, 1000));
   assert.equal(sockets.length, 2, 'did not reconnect');
   sockets[1].open(); sockets[1].recv([0x20, 2, 0, 0]); sockets[1].recv([0x90, 3, 0, 1, 0]);
   assert.deepEqual(states, [true, false, true]);
@@ -236,7 +236,7 @@ await ok('MQTT channel: a refused connection is closed and retried, not treated 
   const ch = mq.makeMqttChannel('wss://broker.example:8084/mqtt', room, { onEnv() {}, onState: u => states.push(u), onFail() {} });
   ch.start();
   sockets[before].open();
-  sockets[before].recv([0x20, 2, 0, 5]);                   // CONNACK: not authorised
+  sockets[before].recv([0x20, 2, 0, 5]);
   assert.equal(sockets[before].readyState, 3);
   assert.equal(ch.up(), false);
   assert.deepEqual(states, []);
@@ -259,7 +259,7 @@ await ok('fan-out channel: duplicates across relays are delivered once, malforme
   sa.cb.onEnv({ iv: '1', ct: 'x' });
   sb.cb.onEnv({ iv: '1', ct: 'x' });
   assert.equal(got.length, 1);
-  sb.cb.onEnv({ iv: '1', ct: 'tampered' });                // same iv, different content: must not be swallowed
+  sb.cb.onEnv({ iv: '1', ct: 'tampered' });
   assert.equal(got.length, 2);
   sa.cb.onEnv({}); sa.cb.onEnv(null); sa.cb.onEnv({ iv: 5, ct: 'x' });
   assert.equal(got.length, 2);
@@ -278,7 +278,7 @@ await ok('fan-out channel: up while any relay is up; start and stop are idempote
   ch.start(); ch.start();
   assert.deepEqual([sa.started, sb.started], [1, 1]);
   ch.stop(); ch.stop();
-  assert.deepEqual([sa.stopped, sb.stopped], [2, 2]);   // stop reaches every relay each time; start only once
+  assert.deepEqual([sa.stopped, sb.stopped], [2, 2]);
   ch.start();
   assert.deepEqual([sa.started, sb.started], [2, 2]);
 });
@@ -320,7 +320,7 @@ await ok('vault: round trip keeps name and bytes, and the host-visible file leak
 await ok('vault: wrong password, any changed byte, and non-vault files are rejected', async () => {
   const packed = await vault.packFile('a.txt', new TextEncoder().encode('hello'), 'one two three four');
   await assert.rejects(vault.unpackFile(packed, 'five six seven eight'), /Wrong password/);
-  for (const at of [10, 25, 40, packed.length - 1]) {      // salt, iv, ciphertext, tag
+  for (const at of [10, 25, 40, packed.length - 1]) {
     const bad = Uint8Array.from(packed); bad[at] ^= 1;
     await assert.rejects(vault.unpackFile(bad, 'one two three four'), /Wrong password/, 'byte ' + at);
   }
