@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Secret Room — Group</title>
+  <style>
+    :root {
+      --bg: #0a0f1f; --panel: #101a30; --line: #2a3a5c; --text: #e8ecff; --muted: #a6b3d9;
+      --moon: #f3d9a4; --accent: #7d8dff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      background: radial-gradient(circle at top, #182547, var(--bg) 50%); color: var(--text);
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+    .card {
+      width: min(720px, calc(100vw - 32px));
+      background: rgba(16,26,48,0.9); border: 1px solid var(--line); border-radius: 18px;
+      padding: 28px 24px; box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+    }
+    nav {
+      display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px;
+      border-bottom: 1px solid var(--line); padding-bottom: 12px;
+    }
+    nav a {
+      color: var(--muted); text-decoration: none; padding: 8px 12px; border-radius: 10px;
+    }
+    nav a.active, nav a:hover {
+      background: rgba(125,141,255,0.12); color: var(--text);
+    }
+    .brand { margin-right: auto; font-weight: 700; color: var(--text); }
+    h1 { margin: 0 0 10px; font-size: clamp(2rem, 5vw, 3rem); }
+    p { color: var(--muted); }
+    .note {
+      margin-top: 20px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px;
+      background: rgba(255,255,255,0.02);
+    }
+    a.primary {
+      display: inline-block; margin-top: 12px; padding: 10px 16px; border-radius: 10px;
+      background: var(--moon); color: #1b1630; font-weight: 700; text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <nav aria-label="Site">
+      <a class="brand" href="../index.html">Secret<span style="color: var(--moon)">Room</span></a>
+      <a href="../index.html">One-to-one</a>
+      <a class="active" href="Group.html" aria-current="page">Group</a>
+      <a href="sharing.html">File Vault</a>
+    </nav>
+
+    <h1>Group chat</h1>
+    <p>This repository does not currently include a dedicated group-chat page, so this route is intentionally a placeholder.</p>
+    <div class="note">
+      To keep the project working, use the one-to-one chat at <a href="../index.html">../index.html</a>.
+      The File Vault is available at <a href="sharing.html">sharing.html</a>.
+    </div>
+    <a class="primary" href="../index.html">Open the main chat</a>
+  </main>
+</body>
+</html>
