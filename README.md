@@ -71,3 +71,4 @@ Metadata and timing, IP addresses (each side sees the other's in a direct link),
 - `search.html`: archive search page
 - `test/core.test.mjs`: tests for the core logic, hosting rules and page links
 - `LICENSE`: MIT
+- `.github/workflows/test.yml`: runs the tests on every push and pull request
