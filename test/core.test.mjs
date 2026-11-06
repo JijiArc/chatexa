@@ -151,6 +151,12 @@ await ok('Xirsys: the host is allowed by the CSP and the answer is parsed in bot
   assert.deepEqual(api.parseXirsys({ s: 'error', v: {} }, false), []);
   assert.deepEqual(api.parseXirsys(null, false), []);
 });
+await ok('join form: every connection mode exists and the TURN box follows the chosen mode', () => {
+  for (const v of ['auto', 'p2p', 'relay', 'manual']) assert.ok(html.includes('<option value="' + v + '"'), 'missing mode ' + v);
+  for (const id of ['turnBox', 'stunRow', 'turnToken', 'xirIdent', 'xirSecret', 'xirChannel']) assert.ok(html.includes('id="' + id + '"'), 'missing #' + id);
+  assert.match(html, /function syncRoute\(\)/);
+  assert.match(html, /route !== 'relay'/);
+});
 await ok('every vault upload host is allowed by the vault CSP', () => {
   const urls = [...vaultHtml.matchAll(/url:"(https:\/\/[^\"]+)"/g)].map(x => x[1]);
   assert.ok(urls.length > 0, 'no upload host configured');

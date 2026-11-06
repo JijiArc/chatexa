@@ -72,6 +72,9 @@ select.input { padding: 11px 14px; }
 .status { margin: 0; min-height: 1.5em; font-size: 14px; color: var(--ink-dim); }
 .status[data-kind="warn"] { color: var(--warn); }
 .status[data-kind="bad"] { color: var(--bad); }
+.turn-box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 14px; color: var(--ink-dim); }
+.turn-box summary { cursor: pointer; color: var(--ink); font-weight: 600; }
+.turn-fields { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .limits { border-top: 1px solid var(--line); padding-top: 14px; font-size: 14px; color: var(--ink-dim); }
 .limits summary { cursor: pointer; color: var(--ink); font-weight: 600; }
 .limits h2 { margin: 14px 0 4px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--moon); }
@@ -149,27 +152,26 @@ select.input { padding: 11px 14px; }
 
       <label for="route">Connection</label>
       <select class="input" id="route">
-        <option value="auto" selected>Automatic: direct, with encrypted relay as backup (recommended)</option>
-        <option value="p2p">Direct only, found through the open relays</option>
-        <option value="relay">Encrypted relay only (works on any network)</option>
+        <option value="auto" selected>Automatic: tries direct (TURN if added), falls back to the encrypted relay (recommended)</option>
+        <option value="p2p">Direct only (STUN, and TURN if added)</option>
+        <option value="relay">Encrypted relay only, works on any network</option>
         <option value="manual">Manual codes, no server at all</option>
       </select>
-      <label class="check" for="useStun">
+      <label class="check" for="useStun" id="stunRow">
         <input type="checkbox" id="useStun" checked>
         <span>Use a STUN server so direct connections work across the internet. Untick for same-network only; the STUN operator then never sees your IP address.</span>
       </label>
 
-      <label class="check" for="turnToken">
-        <span>Optional: Turnix API token for a TURN relay, so direct links also work on strict networks. It stays in this tab's memory, is never saved, and Turnix then sees your IP address.</span>
-      </label>
-      <input class="input" id="turnToken" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Turnix API token (leave empty to skip)">
-
-      <label class="check" for="xirIdent">
-        <span>Optional: Xirsys TURN relay. Enter your identity, secret and channel. They stay in this tab's memory, are never saved, and Xirsys then sees your IP address.</span>
-      </label>
-      <input class="input" id="xirIdent" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys identity (leave empty to skip)">
-      <input class="input" id="xirSecret" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys secret">
-      <input class="input" id="xirChannel" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys channel (empty = chatexa)">
+      <details class="turn-box" id="turnBox">
+        <summary>Optional: TURN relay for strict networks</summary>
+        <div class="turn-fields">
+          <p class="hint">Only needed if direct links fail on mobile data or work networks. Details stay in this tab's memory, are never saved, and the provider then sees your IP address. You can fill in one or both.</p>
+          <input class="input" id="turnToken" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Turnix API token" aria-label="Turnix API token">
+          <input class="input" id="xirIdent" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys identity" aria-label="Xirsys identity">
+          <input class="input" id="xirSecret" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys secret" aria-label="Xirsys secret">
+          <input class="input" id="xirChannel" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys channel (empty = chatexa)" aria-label="Xirsys channel">
+        </div>
+      </details>
 
       <button class="primary" id="joinBtn" type="submit">Join room</button>
       <p class="status" id="joinStatus" role="status" aria-live="polite"></p>
@@ -1004,7 +1006,7 @@ const RELAY_TAG = 'Encrypted relay mode. Content stays sealed, but the relay see
 
 const $ = id => document.getElementById(id);
 const el = {
-  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), turnToken: $('turnToken'), xirIdent: $('xirIdent'), xirSecret: $('xirSecret'), xirChannel: $('xirChannel'), pwToggle: $('pwToggle'), pwHint: $('pwHint'),
+  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), turnBox: $('turnBox'), stunRow: $('stunRow'), turnToken: $('turnToken'), xirIdent: $('xirIdent'), xirSecret: $('xirSecret'), xirChannel: $('xirChannel'), pwToggle: $('pwToggle'), pwHint: $('pwHint'),
   route: $('route'), stun: $('useStun'), joinBtn: $('joinBtn'), joinStatus: $('joinStatus'),
   dot: $('dot'), presence: $('presence'), modeTag: $('modeTag'), lockBtn: $('lockBtn'), notice: $('notice'),
   manual: $('manual'), mBox: $('mBox'), mkInvite: $('mkInvite'), mUse: $('mUse'), mCopy: $('mCopy'), mStatus: $('mStatus'),
@@ -1049,6 +1051,14 @@ el.pwToggle.addEventListener('click', () => {
   el.pwToggle.setAttribute('aria-pressed', String(show));
   el.pwToggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
 });
+/* TURN and STUN only matter when a direct link is attempted. */
+function syncRoute() {
+  const direct = el.route.value === 'auto' || el.route.value === 'p2p';
+  el.turnBox.hidden = !direct;
+  el.stunRow.hidden = el.route.value === 'relay';
+}
+el.route.addEventListener('change', syncRoute);
+syncRoute();
 function resetPasswordField() {
   el.pw.value = ''; el.pw.type = 'password';
   el.pwToggle.textContent = 'Show'; el.pwToggle.setAttribute('aria-pressed', 'false'); el.pwToggle.setAttribute('aria-label', 'Show password');
@@ -1086,7 +1096,7 @@ async function joinRoom() {
   const turnJobs = [];
   if (turnToken) turnJobs.push(loadTurn(turnToken));
   if (xir.ident && xir.secret) turnJobs.push(loadXirsys(xir.ident, xir.secret, xir.channel));
-  if (turnJobs.length && rtcOk && useMode !== 'claude' && useMode !== 'manual') {
+  if (turnJobs.length && rtcOk && route !== 'relay' && useMode !== 'claude' && useMode !== 'manual') {
     setJoin('Getting TURN credentials…');
     turnIce = (await Promise.all(turnJobs)).flat();
     if (!turnIce.length) {
