@@ -14,7 +14,7 @@ const block = (src, name) => {
   return r[1];
 };
 const coreSrc = block(html, 'CORE');
-const api = new Function(coreSrc + '\nreturn { deriveKeys, seal, open, acceptIncoming, getState, assessPassword, parseIceServers };')();
+const api = new Function(coreSrc + '\nreturn { deriveKeys, seal, open, acceptIncoming, getState, assessPassword, parseIceServers, parseXirsys };')();
 
 let n = 0;
 const ok = (name, fn) => Promise.resolve().then(fn).then(() => { n++; console.log('ok  ' + name); });
@@ -138,6 +138,18 @@ await ok('Turnix: only well-formed TURN entries are kept, STUN only when asked, 
   assert.equal(api.parseIceServers(payload, true).length, 2);
   assert.deepEqual(api.parseIceServers(null, true), []);
   assert.deepEqual(api.parseIceServers({ iceServers: 'x' }, true), []);
+});
+await ok('Xirsys: the host is allowed by the CSP and the answer is parsed in both known shapes', () => {
+  const host = html.match(/const XIRSYS_HOST = '([^']+)'/);
+  assert.ok(host && connectOf(html).includes(new URL(host[1]).origin), 'CSP connect-src lacks the Xirsys origin');
+  const entry = { username: 'u', credential: 'c', urls: ['stun:s.example:3478', 'turn:t.example:80?transport=tcp', 'turns:t.example:443?transport=tcp'] };
+  for (const shape of [[entry], entry]) {
+    const out = api.parseXirsys({ s: 'ok', v: { iceServers: shape } }, false);
+    assert.equal(out.length, 1);
+    assert.deepEqual(out[0].urls, ['turn:t.example:80?transport=tcp', 'turns:t.example:443?transport=tcp']);
+  }
+  assert.deepEqual(api.parseXirsys({ s: 'error', v: {} }, false), []);
+  assert.deepEqual(api.parseXirsys(null, false), []);
 });
 await ok('every vault upload host is allowed by the vault CSP', () => {
   const urls = [...vaultHtml.matchAll(/url:"(https:\/\/[^\"]+)"/g)].map(x => x[1]);

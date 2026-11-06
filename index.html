@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="icon" href="data:,">
 <!-- Relays: ntfy.sh plus the public MQTT brokers in MQTT_BROKERS below. If you change either, change connect-src to match (the tests check it). -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh wss://broker.emqx.io:8084 https://turnix.io; img-src data:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh wss://broker.emqx.io:8084 https://turnix.io https://global.xirsys.net; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Secret Room Chat</title>
 <style>
 /* One narrow night-sky column. The lock screen and the chat share it, so unlocking changes the content only.
@@ -163,6 +163,13 @@ select.input { padding: 11px 14px; }
         <span>Optional: Turnix API token for a TURN relay, so direct links also work on strict networks. It stays in this tab's memory, is never saved, and Turnix then sees your IP address.</span>
       </label>
       <input class="input" id="turnToken" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Turnix API token (leave empty to skip)">
+
+      <label class="check" for="xirIdent">
+        <span>Optional: Xirsys TURN relay. Enter your identity, secret and channel. They stay in this tab's memory, are never saved, and Xirsys then sees your IP address.</span>
+      </label>
+      <input class="input" id="xirIdent" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys identity (leave empty to skip)">
+      <input class="input" id="xirSecret" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys secret">
+      <input class="input" id="xirChannel" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys channel (empty = chatexa)">
 
       <button class="primary" id="joinBtn" type="submit">Join room</button>
       <p class="status" id="joinStatus" role="status" aria-live="polite"></p>
@@ -397,6 +404,13 @@ function parseIceServers(payload, keepStun) {
   }
   return out;
 }
+/* Xirsys answers { s: "ok", v: { iceServers: [ { username, credential, urls: [...] } ] } } (older accounts return the object itself). */
+function parseXirsys(payload, keepStun) {
+  if (!payload || payload.s !== 'ok' || !payload.v) return [];
+  const raw = payload.v.iceServers;
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+  return parseIceServers({ iceServers: list }, keepStun);
+}
 /* CORE-END */
 
 /* ===== Transports =====
@@ -444,6 +458,24 @@ async function loadTurn(token) {
     });
     if (!res.ok) return [];
     return parseIceServers(await res.json(), false);
+  } catch (e) { return []; }
+  finally { clearTimeout(timer); }
+}
+
+/* Optional TURN from Xirsys: PUT with HTTP Basic auth (identity:secret). Same rules as Turnix: typed per session, memory only. */
+const XIRSYS_HOST = 'https://global.xirsys.net';
+async function loadXirsys(ident, secret, channel) {
+  const ch = channel || 'chatexa';
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(ident) || !/^[A-Za-z0-9._-]{8,100}$/.test(secret) || !/^[A-Za-z0-9._-]{1,64}$/.test(ch)) return [];
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const res = await fetch(XIRSYS_HOST + '/_turn/' + encodeURIComponent(ch) + '?webrtc=1&expire=' + TURN_TTL_SEC, {
+      method: 'PUT', mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal,
+      headers: { 'Authorization': 'Basic ' + btoa(ident + ':' + secret) }
+    });
+    if (!res.ok) return [];
+    return parseXirsys(await res.json(), false);
   } catch (e) { return []; }
   finally { clearTimeout(timer); }
 }
@@ -972,7 +1004,7 @@ const RELAY_TAG = 'Encrypted relay mode. Content stays sealed, but the relay see
 
 const $ = id => document.getElementById(id);
 const el = {
-  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), turnToken: $('turnToken'), pwToggle: $('pwToggle'), pwHint: $('pwHint'),
+  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), turnToken: $('turnToken'), xirIdent: $('xirIdent'), xirSecret: $('xirSecret'), xirChannel: $('xirChannel'), pwToggle: $('pwToggle'), pwHint: $('pwHint'),
   route: $('route'), stun: $('useStun'), joinBtn: $('joinBtn'), joinStatus: $('joinStatus'),
   dot: $('dot'), presence: $('presence'), modeTag: $('modeTag'), lockBtn: $('lockBtn'), notice: $('notice'),
   manual: $('manual'), mBox: $('mBox'), mkInvite: $('mkInvite'), mUse: $('mUse'), mCopy: $('mCopy'), mStatus: $('mStatus'),
@@ -1049,12 +1081,16 @@ async function joinRoom() {
   useStun = el.stun.checked;
   turnIce = [];
   const turnToken = el.turnToken.value.trim();
-  el.turnToken.value = '';
-  if (turnToken && rtcOk && useMode !== 'claude' && useMode !== 'manual') {
-    setJoin('Getting TURN credentials from Turnix…');
-    turnIce = await loadTurn(turnToken);
+  const xir = { ident: el.xirIdent.value.trim(), secret: el.xirSecret.value.trim(), channel: el.xirChannel.value.trim() };
+  el.turnToken.value = ''; el.xirIdent.value = ''; el.xirSecret.value = ''; el.xirChannel.value = '';
+  const turnJobs = [];
+  if (turnToken) turnJobs.push(loadTurn(turnToken));
+  if (xir.ident && xir.secret) turnJobs.push(loadXirsys(xir.ident, xir.secret, xir.channel));
+  if (turnJobs.length && rtcOk && useMode !== 'claude' && useMode !== 'manual') {
+    setJoin('Getting TURN credentials…');
+    turnIce = (await Promise.all(turnJobs)).flat();
     if (!turnIce.length) {
-      setJoin('Turnix did not give credentials (wrong token, no network, or the service blocks browser requests). Continuing without TURN.', 'bad');
+      setJoin('The TURN provider gave no credentials (wrong details, no network, or the service blocks browser requests). Continuing without TURN.', 'bad');
       await new Promise(r => setTimeout(r, 1800));
     }
   }
@@ -1264,6 +1300,7 @@ function wipeState() {
   el.log.querySelectorAll('.msg').forEach(n => n.remove());
   el.empty.hidden = false;
   el.input.value = ''; el.pw.value = ''; el.mBox.value = ''; el.turnToken.value = '';
+  el.xirIdent.value = ''; el.xirSecret.value = ''; el.xirChannel.value = '';
   turnIce = [];
   tickCount = 0; offTicks = 0; noticeUntil = 0;
   el.manual.hidden = true;

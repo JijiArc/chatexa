@@ -46,6 +46,7 @@ Everything on a relay is an AES-GCM sealed envelope, so the operators and other 
 
 - TURN server: set `EXTRA_ICE_SERVERS` in `index.html` (for example your own coturn). Credentials in a public page are readable by everyone, so use a throwaway account.
 - Turnix TURN relay (optional): paste a Turnix API token into the join form. The page asks Turnix for short-lived TURN credentials (valid one hour) and uses them so direct links also work behind strict NATs. The token is typed per session and kept only in memory: it is never saved, never in the code, and wiped on lock. Turnix says API tokens belong on a server, so if the browser request is refused the page says so and continues without TURN. Never commit a token to this repository.
+- Xirsys TURN relay (optional): enter your Xirsys identity, secret and channel in the join form (a blank channel means `chatexa`). Same rules as Turnix: typed per session, kept only in memory, never saved or committed, and wiped on lock. Xirsys recommends keeping the secret server-side, so if the browser request is refused the page says so and continues without TURN. If the channel does not exist yet, create it in the Xirsys dashboard and type its name.
 - Self-hosted ntfy: change `NTFY_SERVER` and the host in the `connect-src` part of the CSP meta tag. Public ntfy.sh may rate-limit free use; the page backs off and keeps working.
 
 ## Trust model
@@ -54,7 +55,7 @@ Everything on a relay is an AES-GCM sealed envelope, so the operators and other 
 - Public MQTT brokers let anyone list topic names, so other users of the broker can see your room id. Anyone who sees it can test password guesses offline, which makes a strong password matter even more.
 - Setup messages (hello, offer, answer) are AES-GCM sealed, so someone without the password cannot read them or swap in their own connection fingerprint.
 - Everything lives in memory. Locking, closing the tab, 5 minutes idle, or 2 minutes in the background wipes keys and messages.
-- The content security policy permits connections only to the relay hosts (ntfy.sh, the MQTT brokers, and Turnix when you use it). No external scripts, fonts or images.
+- The content security policy permits connections only to the relay hosts (ntfy.sh, the MQTT brokers, and Turnix or Xirsys when you use them). No external scripts, fonts or images.
 
 ## Not covered
 
