@@ -1,48 +1,80 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
-  <title>Secret Room — Group</title>
-  <style>
-    :root {
-      --bg: #0a0f1f; --panel: #101a30; --line: #2a3a5c; --text: #e8ecff; --muted: #a6b3d9;
-      --moon: #f3d9a4; --accent: #7d8dff;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; min-height: 100vh; display: grid; place-items: center;
-      background: radial-gradient(circle at top, #182547, var(--bg) 50%); color: var(--text);
-      font: 16px/1.5 system-ui, sans-serif;
-    }
-    .card {
-      width: min(720px, calc(100vw - 32px));
-      background: rgba(16,26,48,0.9); border: 1px solid var(--line); border-radius: 18px;
-      padding: 28px 24px; box-shadow: 0 24px 60px rgba(0,0,0,0.35);
-    }
-    nav {
-      display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px;
-      border-bottom: 1px solid var(--line); padding-bottom: 12px;
-    }
-    nav a {
-      color: var(--muted); text-decoration: none; padding: 8px 12px; border-radius: 10px;
-    }
-    nav a.active, nav a:hover {
-      background: rgba(125,141,255,0.12); color: var(--text);
-    }
-    .brand { margin-right: auto; font-weight: 700; color: var(--text); }
-    h1 { margin: 0 0 10px; font-size: clamp(2rem, 5vw, 3rem); }
-    p { color: var(--muted); }
-    .note {
-      margin-top: 20px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px;
-      background: rgba(255,255,255,0.02);
-    }
-    a.primary {
-      display: inline-block; margin-top: 12px; padding: 10px 16px; border-radius: 10px;
-      background: var(--moon); color: #1b1630; font-weight: 700; text-decoration: none;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Relays: ntfy.sh plus the public MQTT brokers in MQTT_BROKERS below, and the optional TURN providers. If you change any, change connect-src to match (the tests check it). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh wss://broker.emqx.io:8084 https://turnix.io https://global.xirsys.net; img-src data:; base-uri 'none'; form-action 'none'">
+<title>Secret Room — Group</title>
+<!--
+  chatexa / group.html: group chat for up to 15 people. One static file, no backend, no account.
+  The CORE, MQTT and MULTI blocks and the TURN and relay helpers below are copied from index.html (the tests check the blocks
+  match), so the encryption and the open-relay handling are the same in both pages.
+-->
+<style>
+  :root {
+    --bg: #0a0f1f; --panel: #101a30; --line: #2a3a5c; --text: #e8ecff; --muted: #a6b3d9;
+    --moon: #f3d9a4; --accent: #7d8dff; --bad: #ff9b9b; --ok: #8be0a8;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: start center; padding: 24px 0;
+    background: radial-gradient(circle at top, #182547, var(--bg) 50%); color: var(--text);
+    font: 16px/1.5 system-ui, sans-serif;
+  }
+  .card {
+    width: min(760px, calc(100vw - 24px));
+    background: rgba(16,26,48,0.9); border: 1px solid var(--line); border-radius: 18px;
+    padding: 22px 20px; box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+  }
+  nav { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 8px 12px; border-radius: 10px; }
+  nav a.active, nav a:hover { background: rgba(125,141,255,0.12); color: var(--text); }
+  .brand { margin-right: auto; font-weight: 700; color: var(--text); }
+  h1 { margin: 0 0 6px; font-size: clamp(1.8rem, 5vw, 2.6rem); }
+  p { color: var(--muted); }
+  a { color: var(--accent); }
+  form { display: flex; flex-direction: column; gap: 10px; }
+  label { font-size: 14px; color: var(--muted); }
+  .check { display: flex; gap: 10px; align-items: flex-start; }
+  .check input { margin-top: 4px; accent-color: var(--moon); }
+  .input {
+    width: 100%; background: #0c1428; color: var(--text); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 12px; font: inherit;
+  }
+  .input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .pwrow { display: flex; gap: 8px; }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line); }
+  .ghost { background: transparent; color: var(--muted); padding: 8px 12px; }
+  .ghost:hover { color: var(--text); background: rgba(125,141,255,0.12); }
+  .primary { background: var(--moon); color: #1b1630; font-weight: 700; padding: 11px 16px; border: 0; }
+  .primary:disabled { opacity: .55; cursor: default; }
+  .hint { margin: 0; font-size: 13px; }
+  .hint[data-level="ok"] { color: var(--ok); } .hint[data-level="weak"] { color: var(--bad); }
+  .status { margin: 0; min-height: 1.4em; font-size: 14px; }
+  .status[data-kind="bad"] { color: var(--bad); } .status[data-kind="warn"] { color: var(--moon); }
+  .fine { font-size: 13px; margin-top: 16px; }
+  .turn-box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; font-size: 14px; color: var(--muted); }
+  .turn-box summary { cursor: pointer; color: var(--text); font-weight: 600; }
+  .turn-fields { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .roster { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 10px 0; }
+  .roster li { font-size: 13px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .roster li.direct::before { content: "● "; color: var(--ok); }
+  .roster li.relayed::before { content: "● "; color: var(--moon); }
+  .notice { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; background: rgba(255,255,255,0.03); }
+  .log { height: min(46vh, 420px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: #0c1428; }
+  .empty { margin: auto; font-size: 14px; }
+  .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; background: #17233f; display: flex; flex-direction: column; gap: 2px; transition: opacity .4s; }
+  .msg.mine { align-self: flex-end; background: #2a3470; }
+  .msg .who { font-size: 12px; color: var(--moon); }
+  .msg .text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+  .msg .left { font-size: 11px; color: var(--muted); align-self: flex-end; }
+  .send { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 10px; align-items: stretch; }
+  .send textarea { resize: none; }
+  @media (max-width: 520px) { .send { grid-template-columns: 1fr auto; } .send textarea { grid-column: 1 / -1; } .card { padding: 16px 14px; } }
+</style>
 </head>
 <body>
   <main class="card">
@@ -55,13 +87,1032 @@
       <a href="privacy.html">Privacy</a>
     </nav>
 
-    <h1>Group chat</h1>
-    <p>This repository does not currently include a dedicated group-chat page, so this route is intentionally a placeholder.</p>
-    <div class="note">
-      To keep the project working, use the one-to-one chat at <a href="index.html">index.html</a>.
-      The File Vault is available at <a href="sharing.html">sharing.html</a>.
-    </div>
-    <a class="primary" href="index.html">Open the main chat</a>
+    <section id="lock" aria-labelledby="title">
+      <h1 id="title">Group chat</h1>
+      <p class="lede">Up to 15 people, one shared password. Messages are encrypted in your browser, go straight between members, and vanish after the time you pick, up to 75 seconds.</p>
+      <form id="joinForm" autocomplete="off">
+        <label for="pw">Shared password</label>
+        <div class="pwrow">
+          <input class="input" id="pw" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Four or more random words" aria-describedby="pwHint">
+          <button class="ghost" id="pwToggle" type="button" aria-pressed="false">Show</button>
+        </div>
+        <p class="hint" id="pwHint" aria-live="polite"></p>
+
+        <label for="nick">Your name (optional)</label>
+        <input class="input" id="nick" type="text" maxlength="24" autocomplete="off" spellcheck="false" placeholder="Shown to the others in the room">
+
+        <label class="check" for="useStun">
+          <input type="checkbox" id="useStun" checked>
+          <span>Use a STUN server so direct connections work across the internet. Untick for same-network only; the STUN operator then never sees your IP address.</span>
+        </label>
+
+        <details class="turn-box" id="turnBox">
+          <summary>Optional: TURN relay for strict networks</summary>
+          <div class="turn-fields">
+            <p class="hint">Only needed if links fail on mobile data or work networks. Details stay in this tab's memory, are never saved, and the provider then sees your IP address. You can fill in one or both.</p>
+            <input class="input" id="turnToken" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Turnix API token" aria-label="Turnix API token">
+            <input class="input" id="xirIdent" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys identity" aria-label="Xirsys identity">
+            <input class="input" id="xirSecret" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys secret" aria-label="Xirsys secret">
+            <input class="input" id="xirChannel" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Xirsys channel (empty = chatexa)" aria-label="Xirsys channel">
+          </div>
+        </details>
+
+        <button class="primary" id="joinBtn" type="submit">Join the group</button>
+        <p class="status" id="joinStatus" role="status" aria-live="polite"></p>
+      </form>
+      <p class="fine">Each member connects directly to every other member, so the room is capped at 15. The open relays only help people find each other and see sealed data. See the <a href="privacy.html">privacy policy</a>.</p>
+    </section>
+
+    <section id="chat" hidden>
+      <div class="bar">
+        <strong id="roomCount">1 / 15 in the room</strong>
+        <button class="ghost" id="lockBtn" type="button">Lock</button>
+      </div>
+      <ul id="roster" class="roster" aria-label="People in the room"></ul>
+      <p id="notice" class="notice" role="status" hidden></p>
+      <div id="log" class="log" aria-live="polite"><p id="empty" class="empty">No messages yet.</p></div>
+      <form id="sendForm" class="send" autocomplete="off">
+        <textarea class="input" id="input" rows="2" maxlength="4000" placeholder="Type a message (Enter to send)"></textarea>
+        <select class="input" id="ttl" aria-label="Disappear after">
+          <option value="15">15 s</option>
+          <option value="30">30 s</option>
+          <option value="60" selected>60 s</option>
+          <option value="75">75 s</option>
+        </select>
+        <button class="primary" type="submit">Send</button>
+      </form>
+    </section>
   </main>
+<script>
+'use strict';
+/* CORE-BEGIN */
+/* ===== Core: pure logic. No DOM, no transport, no globals except the Web Crypto API. ===== */
+
+const PBKDF2_ITERATIONS = 600000;
+const APP_SALT = 'secret-room-chat/v2';
+const DEFAULT_TTL = 60;
+const MIN_TTL = 5;
+const MAX_TTL = 75;
+const FADE_SEC = 5;
+const MAX_AGE_SEC = 75;       // reject anything older than this after decryption (replay defence)
+const DRIFT_SEC = 15;         // tolerated clock difference between the two devices
+const HEARTBEAT_MAX_AGE_SEC = 30;
+const MAX_ENVELOPE_BYTES = 4000;
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+function viewBytes(x) {
+  return ArrayBuffer.isView(x) ? new Uint8Array(x.buffer, x.byteOffset, x.byteLength) : new Uint8Array(x);
+}
+function toB64(x) {
+  const b = viewBytes(x);
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+  return btoa(s);
+}
+function fromB64(str) {
+  const s = atob(str);
+  const b = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+  return b;
+}
+function toHex(b) {
+  let s = '';
+  for (let i = 0; i < b.length; i++) s += b[i].toString(16).padStart(2, '0');
+  return s;
+}
+function newId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return toHex(crypto.getRandomValues(new Uint8Array(16)));
+}
+
+/*
+ * Key derivation:
+ *   password' = NFKC(password).trim()
+ *   salt      = SHA-256( APP_SALT || 0x00 || UTF-8(password') )
+ *   bits      = PBKDF2-HMAC-SHA-256(password', salt, 600000 iterations, 512 bits)
+ *   AES-GCM key = bits[0..32)  (non-extractable)
+ *   room id     = hex(bits[32..48))  (32 hex chars; also the relay topic name)
+ * The room id lets anyone who sees it test password guesses offline (each guess costs 600k PBKDF2 rounds),
+ * so a weak password is weak even though the key never leaves the browser.
+ */
+function concatBytes(...parts) {
+  let n = 0;
+  for (const p of parts) n += p.length;
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+async function deriveKeys(password) {
+  const pw = enc.encode(String(password).normalize('NFKC').trim());
+  const salt = viewBytes(await crypto.subtle.digest('SHA-256', concatBytes(enc.encode(APP_SALT), new Uint8Array([0]), pw)));
+  const base = await crypto.subtle.importKey('raw', pw, 'PBKDF2', false, ['deriveBits']);
+  const bits = viewBytes(await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PBKDF2_ITERATIONS }, base, 512));
+  const key = await crypto.subtle.importKey('raw', bits.slice(0, 32), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  const roomId = toHex(bits.slice(32, 48));
+  bits.fill(0);
+  pw.fill(0);
+  return { key, roomId };
+}
+
+/* Fresh random 12-byte IV per message. Never reused. */
+async function seal(key, obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));
+  return { iv: toB64(iv), ct: toB64(ct) };
+}
+/* Returns null on any failure: wrong key, tampering, bad encoding. */
+async function open(key, ivB64, ctB64) {
+  try {
+    const iv = fromB64(ivB64);
+    if (iv.length !== 12) return null;
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, fromB64(ctB64));
+    const obj = JSON.parse(dec.decode(pt));
+    return obj && typeof obj === 'object' ? obj : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getState(m, now) {
+  const remaining = m.ttl - (now - m.sentAt) / 1000;
+  const expired = remaining <= 0;
+  const fading = !expired && remaining <= FADE_SEC;
+  return { remaining, expired, fading, opacity: fading ? Math.max(0.2, remaining / FADE_SEC) : 1 };
+}
+
+/* Judge a decrypted chat payload. Returns a normalised object, or null to discard silently. */
+function acceptIncoming(p, now, seen) {
+  if (!p || typeof p !== 'object') return null;
+  const t = p.t;
+  if (t !== 'm' && t !== 'a' && t !== 'h') return null;
+  if (typeof p.from !== 'string' || p.from.length === 0 || p.from.length > 64) return null;
+  if (typeof p.sentAt !== 'number' || !isFinite(p.sentAt)) return null;
+  const age = (now - p.sentAt) / 1000;
+  if (age < -DRIFT_SEC) return null;
+  if (age > (t === 'h' ? HEARTBEAT_MAX_AGE_SEC : MAX_AGE_SEC)) return null;
+  if (t === 'h') return { t: 'h', from: p.from, r: p.r ? 1 : 0 };
+  if (typeof p.id !== 'string' || p.id.length === 0 || p.id.length > 64) return null;
+  const dedupe = t + ':' + p.id;
+  if (seen.has(dedupe)) return null;
+  const sentAt = Math.min(p.sentAt, now);
+  seen.set(dedupe, sentAt + (MAX_AGE_SEC + DRIFT_SEC) * 1000);
+  if (t === 'a') return { t: 'a', id: p.id, from: p.from };
+  if (typeof p.text !== 'string' || p.text.length === 0 || p.text.length > 4000) return null;
+  let ttl = Number(p.ttl);
+  if (!isFinite(ttl)) ttl = DEFAULT_TTL;
+  ttl = Math.min(MAX_TTL, Math.max(MIN_TTL, Math.round(ttl)));
+  const m = { t: 'm', id: p.id, from: p.from, text: p.text, sentAt, ttl };
+  if (getState(m, now).expired) return null;
+  return m;
+}
+
+const COMMON = new Set(['password', 'password1', 'passw0rd', '123456', '12345678', '123456789', 'qwerty', 'qwertyuiop',
+  'letmein', 'welcome', 'welcome1', 'admin', 'admin123', 'iloveyou', 'secret', 'secretroom', 'monkey', 'dragon', 'abc123', '111111']);
+function assessPassword(pw) {
+  const p = String(pw || '').normalize('NFKC').trim();
+  if (!p) return { empty: true, ok: false, notes: [] };
+  const notes = [];
+  const lower = p.toLowerCase();
+  if (COMMON.has(lower) || COMMON.has(lower.replace(/\d+$/, ''))) notes.push('This is a very common password.');
+  const words = p.split(/[\s_.,+-]+/).filter(w => w.length >= 3).length;
+  if (p.length < 12) notes.push('It is short (under 12 characters).');
+  let pool = 0;
+  if (/[a-z]/.test(p)) pool += 26;
+  if (/[A-Z]/.test(p)) pool += 26;
+  if (/\d/.test(p)) pool += 10;
+  if (/[^a-zA-Z\d]/.test(p)) pool += 33;
+  const bits = Math.round(p.length * Math.log2(pool || 1));
+  if (words < 4) {
+    if (/^[^\d\s]+\d{1,4}[!?.]?$/.test(p)) notes.push('A word followed by digits is one of the first things attackers try.');
+    else if (bits < 70) notes.push('It looks easy to guess.');
+  }
+  return { empty: false, ok: notes.length === 0 && (words >= 4 || bits >= 70), notes, words, bits };
+}
+/* Turnix answers { iceServers: [ {urls:[stun...]}, {urls:[turn...], username, credential} ] }. Keep only well-formed entries. */
+function parseIceServers(payload, keepStun) {
+  const list = payload && Array.isArray(payload.iceServers) ? payload.iceServers : [];
+  const out = [];
+  for (const s of list) {
+    if (!s) continue;
+    const urls = (Array.isArray(s.urls) ? s.urls : [s.urls]).filter(u => typeof u === 'string' && /^(stun|turns?):[^\s]+$/.test(u));
+    if (!urls.length) continue;
+    const isTurn = urls.some(u => /^turns?:/.test(u));
+    if (isTurn) {
+      if (typeof s.username !== 'string' || typeof s.credential !== 'string' || !s.username || !s.credential) continue;
+      out.push({ urls: urls.filter(u => /^turns?:/.test(u)), username: s.username, credential: s.credential });
+    } else if (keepStun) {
+      out.push({ urls });
+    }
+  }
+  return out;
+}
+/* Xirsys answers { s: "ok", v: { iceServers: [ { username, credential, urls: [...] } ] } } (older accounts return the object itself). */
+function parseXirsys(payload, keepStun) {
+  if (!payload || payload.s !== 'ok' || !payload.v) return [];
+  const raw = payload.v.iceServers;
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
+  return parseIceServers({ iceServers: list }, keepStun);
+}
+/* CORE-END */
+
+/* ===== Relays and links (copied from index.html) ===== */
+const NTFY_SERVER = 'https://ntfy.sh';   // open public relay, no account; self-host and change this (and the CSP) if you prefer
+/* Open public MQTT brokers, reached over secure WebSocket: no account, no setup. Setup and relay traffic goes to ntfy.sh and to
+ * every broker listed here at once, so one relay being slow or down does not stop the chat. Everything on them is an AES-GCM
+ * sealed envelope. To add a broker, add its wss:// URL here and its host:port to connect-src in the CSP meta tag. */
+const MQTT_BROKERS = ['wss://broker.emqx.io:8084/mqtt'];
+const STUN_URLS = ['stun:stun.cloudflare.com:3478'];
+/* Optional TURN server for networks that block direct links, for example your own coturn:
+ *   [{ urls: 'turn:turn.example.org:3478', username: 'user', credential: 'pass' }]
+ * Anything written here is readable by everyone who opens the page, so use a throwaway account. */
+const EXTRA_ICE_SERVERS = [];
+const SIG_CHUNK = 3000;                  // ntfy messages are limited to 4096 bytes
+const HELLO_STEPS = [3000, 6000, 12000, 30000];   // announce quickly, then back off (ntfy.sh rate-limits publishers)
+const CONNECT_TIMEOUT_MS = 20000;
+const MANUAL_MAX_MS = 10 * 60 * 1000;
+const SIGNAL_MAX_AGE_SEC = 30;
+
+let useStun = true;   // set from the checkbox at join time
+
+/* Optional TURN from Turnix. The token is typed by the person at join time and lives only in this variable's one fetch call;
+ * it is never written to the page, storage or the repository. The credentials it returns expire after TURN_TTL_SEC. */
+const TURN_API = 'https://turnix.io/api/v1/credentials/ice';
+const TURN_TTL_SEC = 3600;
+let turnIce = [];
+
+async function loadTurn(token) {
+  if (!/^[A-Za-z0-9._~+\-]{8,200}$/.test(token)) return [];
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const res = await fetch(TURN_API, {
+      method: 'POST', mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal,
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ttl: TURN_TTL_SEC })
+    });
+    if (!res.ok) return [];
+    return parseIceServers(await res.json(), false);
+  } catch (e) { return []; }
+  finally { clearTimeout(timer); }
+}
+
+/* Optional TURN from Xirsys: PUT with HTTP Basic auth (identity:secret). Same rules as Turnix: typed per session, memory only. */
+const XIRSYS_HOST = 'https://global.xirsys.net';
+async function loadXirsys(ident, secret, channel) {
+  const ch = channel || 'chatexa';
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(ident) || !/^[A-Za-z0-9._-]{8,100}$/.test(secret) || !/^[A-Za-z0-9._-]{1,64}$/.test(ch)) return [];
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const res = await fetch(XIRSYS_HOST + '/_turn/' + encodeURIComponent(ch) + '?webrtc=1&expire=' + TURN_TTL_SEC, {
+      method: 'PUT', mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal,
+      headers: { 'Authorization': 'Basic ' + btoa(ident + ':' + secret) }
+    });
+    if (!res.ok) return [];
+    return parseXirsys(await res.json(), false);
+  } catch (e) { return []; }
+  finally { clearTimeout(timer); }
+}
+
+function iceConfig() {
+  return { iceServers: [...(useStun ? [{ urls: STUN_URLS }] : []), ...turnIce, ...EXTRA_ICE_SERVERS] };
+}
+
+function gathered(pc, ms) {
+  return new Promise(res => {
+    if (pc.iceGatheringState === 'complete') return res();
+    let to;
+    const chk = () => { if (pc.iceGatheringState === 'complete') done(); };
+    const done = () => { pc.removeEventListener('icegatheringstatechange', chk); clearTimeout(to); res(); };
+    pc.addEventListener('icegatheringstatechange', chk);
+    to = setTimeout(done, ms);
+  });
+}
+
+/* One RTCPeerConnection plus its data channel. Non-trickle: the full SDP is sent once. */
+function newLink(cb) {
+  const pc = new RTCPeerConnection(iceConfig());
+  const L = { pc, dc: null, dead: false };
+  let dropTimer = null;
+  const down = () => { clearTimeout(dropTimer); if (!L.dead) { L.dead = true; cb.onDown(L); } };
+  const attach = dc => {
+    L.dc = dc;
+    dc.onopen = () => cb.onUp(L);
+    dc.onclose = down;
+    dc.onmessage = e => {
+      if (typeof e.data !== 'string' || e.data.length > 9000) return;
+      let env;
+      try { env = JSON.parse(e.data); } catch (err) { return; }
+      cb.onEnv(env);
+    };
+  };
+  pc.ondatachannel = e => attach(e.channel);
+  /* 'disconnected' often heals by itself (a Wi-Fi blip), but a dead path can sit in it for a long time while the data
+   * channel still looks open and messages vanish. Give it 8 seconds, then treat the link as down and reconnect. */
+  pc.onconnectionstatechange = () => {
+    const s = pc.connectionState;
+    clearTimeout(dropTimer);
+    if (s === 'failed' || s === 'closed') down();
+    else if (s === 'disconnected') dropTimer = setTimeout(down, 8000);
+  };
+  L.makeChannel = () => attach(pc.createDataChannel('chat'));
+  L.isOpen = () => !!L.dc && L.dc.readyState === 'open';
+  L.close = () => { L.dead = true; clearTimeout(dropTimer); try { if (L.dc) L.dc.close(); } catch (e) { /* gone */ } try { pc.close(); } catch (e) { /* gone */ } };
+  return L;
+}
+function offline() { const e = new Error('offline'); e.code = 'offline'; return e; }
+
+function makeNtfyChannel(roomId, cb) {
+  const base = NTFY_SERVER.replace(/\/+$/, '') + '/sr-' + roomId;
+  let es = null, live = false;
+  const chunks = new Map();
+
+  /* Publish one sealed envelope to the relay topic, split into chunks that fit its message limit. */
+  async function post(env) {
+    const s = JSON.stringify(env);
+    const id = newId().slice(0, 8), n = Math.ceil(s.length / SIG_CHUNK);
+    for (let i = 0; i < n; i++) {
+      const r = await fetch(base, { method: 'POST', body: id + '|' + i + '|' + n + '|' + s.slice(i * SIG_CHUNK, (i + 1) * SIG_CHUNK),
+        cache: 'no-store', referrerPolicy: 'no-referrer' });
+      if (!r.ok) { const e = new Error('relay'); e.code = 'relay_' + r.status; throw e; }
+    }
+  }
+  function onSse(raw) {
+    let j;
+    try { j = JSON.parse(raw); } catch (e) { return; }
+    if (!j || j.event !== 'message' || typeof j.message !== 'string' || j.message.length > 6000) return;
+    const a = j.message.split('|');
+    if (a.length < 4) return;
+    const id = a[0], i = Number(a[1]), n = Number(a[2]);
+    if (id.length > 16 || !(n >= 1 && n <= 8 && i >= 0 && i < n && Number.isInteger(i) && Number.isInteger(n))) return;
+    let c = chunks.get(id);
+    if (!c) {
+      if (chunks.size >= 16) chunks.delete(chunks.keys().next().value);
+      c = { n, parts: [] };
+      chunks.set(id, c);
+    }
+    c.parts[i] = a.slice(3).join('|');
+    let have = 0;
+    for (let x = 0; x < c.n; x++) if (c.parts[x] !== undefined) have++;
+    if (have < c.n) return;
+    chunks.delete(id);
+    let env;
+    try { env = JSON.parse(c.parts.join('')); } catch (e) { return; }
+    cb.onEnv(env);
+  }
+  return {
+    name: 'ntfy',
+    start() {
+      if (es) return;
+      /* since=20s replays what was published just before we connected, so an offer sent while this side was
+       * still opening its stream is not lost. Replays are harmless: setup messages expire and chat ids are deduped. */
+      es = new EventSource(base + '/sse?since=20s');
+      es.onopen = () => { if (!live) { live = true; cb.onState(true); } };
+      es.onmessage = ev => onSse(ev.data);
+      es.onerror = () => {
+        if (live) { live = false; cb.onState(false); }
+        if (es && es.readyState === 2) cb.onFail('relay_closed');
+      };
+    },
+    stop() { if (es) { es.close(); es = null; } live = false; chunks.clear(); },
+    post,
+    up: () => live
+  };
+}
+
+/* MQTT-BEGIN */
+/* Minimal MQTT 3.1.1 over WebSocket: QoS 0, clean session, one topic. Just enough to use an open public broker as a relay. */
+function mqttLen(n) {
+  const out = [];
+  do { let b = n % 128; n = Math.floor(n / 128); if (n > 0) b |= 128; out.push(b); } while (n > 0);
+  return out;
+}
+function mqttStr(s) {
+  const b = enc.encode(s);
+  return concatBytes(new Uint8Array([b.length >> 8, b.length & 255]), b);
+}
+function mqttPacket(first, ...parts) {
+  const body = concatBytes(...parts);
+  return concatBytes(new Uint8Array([first, ...mqttLen(body.length)]), body);
+}
+/* Feed it every WebSocket message. A message may hold several packets, or only part of one. */
+function mqttReader(onPacket) {
+  let buf = new Uint8Array(0);
+  return chunk => {
+    buf = buf.length ? concatBytes(buf, chunk) : chunk;
+    for (;;) {
+      if (buf.length < 2) return;
+      let len = 0, mul = 1, i = 1, b;
+      do {
+        if (i >= buf.length) return;                       // length bytes not all here yet
+        if (i > 4) throw new Error('mqtt_malformed');
+        b = buf[i++];
+        len += (b & 127) * mul;
+        mul *= 128;
+      } while (b & 128);
+      if (len > 1048576) throw new Error('mqtt_too_large');
+      if (buf.length < i + len) return;                    // body not all here yet
+      const first = buf[0], body = buf.subarray(i, i + len);
+      buf = buf.subarray(i + len);
+      onPacket(first, body);
+    }
+  };
+}
+
+/* One public broker. Reconnects by itself with jittered backoff and detects a silently dead connection
+ * (mobile network switch, NAT timeout) with a ping every 20 seconds. cb.onState(true) fires once subscribed. */
+function makeMqttChannel(url, roomId, cb) {
+  const topic = 'chatexa/v2/' + roomId;
+  const clientId = 'cx' + toHex(crypto.getRandomValues(new Uint8Array(8)));
+  let ws = null, closed = true, ready = false, retry = 0, retryTimer = null, pingTimer = null, lastRx = 0, warned = false;
+
+  function stopPing() { clearInterval(pingTimer); pingTimer = null; }
+  function startPing() {
+    stopPing();
+    pingTimer = setInterval(() => {
+      if (!ws || ws.readyState !== 1) return;
+      if (Date.now() - lastRx > 50000) { try { ws.close(); } catch (e) { /* gone */ } return; }   // no reply: dead link
+      try { ws.send(new Uint8Array([0xC0, 0])); } catch (e) { /* closing */ }                       // PINGREQ
+    }, 20000);
+  }
+  function schedule() {
+    if (closed || retryTimer) return;
+    const delay = Math.min(15000, 500 * Math.pow(2, retry++)) * (0.7 + Math.random() * 0.6);
+    retryTimer = setTimeout(() => { retryTimer = null; connect(); }, delay);
+    if (retry >= 5 && !warned) { warned = true; cb.onFail('relay_unreachable'); }
+  }
+  function connect() {
+    if (closed || ws) return;
+    let s;
+    try { s = new WebSocket(url, 'mqtt'); } catch (e) { schedule(); return; }
+    s.binaryType = 'arraybuffer';
+    ws = s; ready = false;
+    const read = mqttReader((first, body) => {
+      if (ws !== s) return;
+      const type = first >> 4;
+      if (type === 2) {                                    // CONNACK: second byte is the return code, 0 = accepted
+        if (body.length < 2 || body[1] !== 0) { s.close(); return; }
+        s.send(mqttPacket(0x82, new Uint8Array([0, 1]), mqttStr(topic), new Uint8Array([0])));   // SUBSCRIBE, QoS 0
+      } else if (type === 9) {                             // SUBACK: 0x80 means refused
+        if (body.length < 3 || body[2] === 0x80) { s.close(); return; }
+        ready = true; retry = 0; warned = false; startPing(); cb.onState(true);
+      } else if (type === 3) {                             // PUBLISH
+        const qos = (first >> 1) & 3;
+        if (qos === 2 || body.length < 2) return;
+        const tl = (body[0] << 8) | body[1];
+        let o = 2 + tl;
+        if (body.length < o + (qos ? 2 : 0) || dec.decode(body.subarray(2, o)) !== topic) return;
+        if (qos === 1) { s.send(new Uint8Array([0x40, 2, body[o], body[o + 1]])); o += 2; }       // PUBACK (we ask for QoS 0, so rare)
+        const payload = body.subarray(o);
+        if (payload.length > 24000) return;
+        let env;
+        try { env = JSON.parse(dec.decode(payload)); } catch (e) { return; }
+        cb.onEnv(env);
+      }
+    });
+    s.onopen = () => {
+      if (ws !== s) return;
+      lastRx = Date.now();
+      s.send(mqttPacket(0x10, mqttStr('MQTT'), new Uint8Array([4, 2, 0, 30]), mqttStr(clientId)));   // CONNECT: v3.1.1, clean session, keepalive 30s
+    };
+    s.onmessage = ev => {
+      if (ws !== s) return;
+      lastRx = Date.now();
+      if (!(ev.data instanceof ArrayBuffer)) return;
+      try { read(new Uint8Array(ev.data)); } catch (e) { try { s.close(); } catch (e2) { /* gone */ } }
+    };
+    s.onclose = () => {
+      if (ws !== s) return;
+      ws = null; stopPing();
+      const was = ready; ready = false;
+      if (was) cb.onState(false);
+      schedule();
+    };
+    s.onerror = () => { try { s.close(); } catch (e) { /* gone */ } };
+  }
+  return {
+    name: 'mqtt',
+    start() { if (!closed) return; closed = false; retry = 0; warned = false; connect(); },
+    stop() {
+      closed = true; ready = false;
+      clearTimeout(retryTimer); retryTimer = null; stopPing();
+      if (ws) {
+        const s = ws; ws = null;
+        try { if (s.readyState === 1) s.send(new Uint8Array([0xE0, 0])); } catch (e) { /* gone */ }   // DISCONNECT
+        try { s.close(); } catch (e) { /* gone */ }
+      }
+    },
+    async post(env) {
+      if (!ready || !ws || ws.readyState !== 1) throw offline();
+      ws.send(mqttPacket(0x30, mqttStr(topic), enc.encode(JSON.stringify(env))));
+    },
+    up: () => ready && !!ws && ws.readyState === 1
+  };
+}
+/* MQTT-END */
+
+/* MULTI-BEGIN */
+/* All open relays at once: ntfy.sh plus every broker in MQTT_BROKERS. A post goes to all of them and counts as sent as soon
+ * as one accepts it; an envelope that arrives on more than one relay is handed up only once. The channel is "up" while any
+ * relay is up, and reports a failure only when every relay has failed. */
+function makeMultiChannel(roomId, cb) {
+  const seen = new Set();
+  const failed = new Set();
+  const subs = [];
+  let started = false, anyUp = false, reported = false;
+
+  function refresh() {
+    const now = subs.some(s => s.up());
+    if (now !== anyUp) { anyUp = now; cb.onState(now); }
+  }
+  function add(make) {
+    const sub = make({
+      onEnv: env => {
+        if (!env || typeof env.iv !== 'string' || typeof env.ct !== 'string') return;
+        const id = env.iv + env.ct;                        // exact duplicates only: a tampered copy must not hide the real one
+        if (seen.has(id)) return;
+        seen.add(id);
+        if (seen.size > 200) seen.delete(seen.values().next().value);
+        cb.onEnv(env);
+      },
+      onState: up => { if (up) { failed.delete(sub); reported = false; } refresh(); },
+      onFail: () => {
+        failed.add(sub);
+        if (!reported && failed.size === subs.length) { reported = true; cb.onFail('relay_unreachable'); }
+      }
+    });
+    subs.push(sub);
+  }
+  add(c => makeNtfyChannel(roomId, c));
+  for (const url of MQTT_BROKERS) add(c => makeMqttChannel(url, roomId, c));
+
+  return {
+    name: 'open-relays',
+    start() { if (started) return; started = true; subs.forEach(s => s.start()); },
+    stop() { started = false; subs.forEach(s => s.stop()); failed.clear(); reported = false; anyUp = false; },
+    post(env) {
+      return Promise.any(subs.map(s => s.post(env))).then(() => {}, e => {
+        const errs = (e && e.errors) || [];
+        throw errs.find(x => x && x.code && x.code !== 'offline') || errs[0] || offline();   // prefer a real refusal (rate limit) over "offline"
+      });
+    },
+    up: () => subs.some(s => s.up())
+  };
+}
+/* MULTI-END */
+
+/* GROUP-BEGIN */
+/* ===== Group room: a full mesh of WebRTC data channels, found and set up through the open relays =====
+ * Everyone who knows the password joins the same sealed relay topic. Members announce themselves (hello), and every pair
+ * opens one direct data channel (the member with the smaller session id makes the offer). Chat goes straight to every
+ * connected member; a member who has no direct channel yet is reached through the encrypted relay instead, and receivers
+ * show each message once. TURN credentials (Turnix, Xirsys) make the direct channels work on strict networks.
+ * The room holds at most GROUP_MAX people: the first GROUP_MAX members by join time are admitted, everyone else is turned away.
+ * This is enforced by the pages themselves, so it limits honest clients, not someone who already holds the password. */
+const GROUP_MAX = 15;
+const GROUP_ACTIVE_MS = 75000;     // a member not heard from for this long is considered gone
+const GROUP_HELLO_MS = 25000;      // steady-state announce interval
+const GROUP_PARALLEL = 3;          // offers in flight at once, so a newcomer does not hammer the relays
+const GROUP_SPACING_MS = 250;
+
+function cleanName(s) {
+  if (typeof s !== 'string') return '';
+  return s.replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 24);
+}
+
+function makeGroupTransport(makeChan, getKey, getSession, me, h) {
+  const t = { closed: false };
+  const self = getSession();
+  const members = new Map();    // session -> { name, joinedAt, seenAt }
+  const links = new Map();      // session -> { id, L, up, counted, sdp, timer }
+  const fails = new Map();      // session -> failed attempts in a row
+  const queue = [];             // peers we still have to make an offer to
+  let pending = 0, pumping = false, lastReply = 0, wasFull = false, helloTimer = null, helloStep = 0, retryTimer = null;
+  members.set(self, { name: me.name, joinedAt: me.joinedAt, seenAt: Infinity });
+
+  const chan = makeChan({
+    onEnv: env => handleEnv(env),
+    onState: up => { if (t.closed) return; if (up) announce(true, true); if (h.onRelay) h.onRelay(up); },
+    onFail: code => { if (!t.closed) h.onError({ code }); }
+  });
+
+  const short = id => id.slice(0, 4);
+  function active(now) {
+    const out = [];
+    for (const [id, m] of members) if (id === self || now - m.seenAt < GROUP_ACTIVE_MS) out.push([id, m]);
+    out.sort((a, b) => (a[1].joinedAt - b[1].joinedAt) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return out;
+  }
+  const admitted = now => new Set(active(now).slice(0, GROUP_MAX).map(x => x[0]));
+  const openLink = id => { const l = links.get(id); return l && l.up && l.L.isOpen() ? l : null; };
+
+  async function relayPost(obj) {
+    const k = getKey();
+    if (!k) return;
+    await chan.post(await seal(k, obj));
+  }
+  async function announce(wantsReply, viaRelay) {
+    const k = getKey();
+    if (!k || t.closed) return;
+    const env = await seal(k, { t: 'hello', from: self, name: me.name, joinedAt: me.joinedAt, sentAt: Date.now(), r: wantsReply ? 1 : 0 });
+    for (const l of links.values()) if (l.up && l.L.isOpen()) { try { l.L.dc.send(JSON.stringify(env)); } catch (e) { /* link going down */ } }
+    if (viaRelay !== false && chan.up()) chan.post(env).catch(() => {});
+  }
+
+  async function handleEnv(env) {
+    const k = getKey();
+    if (!k || t.closed || !env || typeof env.iv !== 'string' || typeof env.ct !== 'string' || env.iv.length !== 16 || env.ct.length > 20000) return;
+    const p = await open(k, env.iv, env.ct);
+    if (!p || k !== getKey() || t.closed) return;
+    if (typeof p.from !== 'string' || p.from.length === 0 || p.from.length > 64 || p.from === self) return;
+    const now = Date.now();
+    const m = members.get(p.from);
+    if (m) m.seenAt = now;
+    if (p.t === 'm') { h.onEnv(p); return; }          // chat: the page judges and de-duplicates it
+    if (typeof p.sentAt !== 'number') return;
+    const age = (now - p.sentAt) / 1000;
+    if (!(age > -DRIFT_SEC && age < SIGNAL_MAX_AGE_SEC)) return;
+    if (p.t === 'hello') return onHello(p, now);
+    if (p.t === 'bye') return onBye(p.from);
+    if (p.to !== self || typeof p.sdp !== 'string' || p.sdp.length > 20000) return;
+    if (p.t === 'offer') return onOffer(p, now);
+    if (p.t === 'answer') return onAnswer(p);
+  }
+
+  function onHello(p, now) {
+    const joinedAt = typeof p.joinedAt === 'number' && isFinite(p.joinedAt) ? Math.min(p.joinedAt, now) : now;
+    members.set(p.from, { name: cleanName(p.name) || short(p.from), joinedAt, seenAt: now });
+    if (p.r && now - lastReply > 1500) { lastReply = now; announce(false); }
+    evaluate();
+  }
+  function onBye(id) {
+    members.delete(id);
+    dropLink(id);
+    evaluate();
+  }
+
+  /* Who should be connected, who is admitted, and what the roster looks like. */
+  function evaluate() {
+    if (t.closed) return;
+    const now = Date.now();
+    for (const [id, m] of members) if (id !== self && now - m.seenAt > GROUP_ACTIVE_MS * 3) { members.delete(id); dropLink(id); }
+    const adm = admitted(now);
+    if (!adm.has(self)) {
+      if (!wasFull) { wasFull = true; h.onFull(); }
+      return;
+    }
+    for (const id of adm) {
+      if (id === self || links.has(id) || queue.includes(id)) continue;
+      if (self < id && (fails.get(id) || 0) < 2) queue.push(id);
+    }
+    for (const id of [...links.keys()]) if (!adm.has(id)) dropLink(id);
+    pump();
+    publish();
+  }
+  function publish() {
+    const now = Date.now();
+    const list = active(now).slice(0, GROUP_MAX).map(([id, m]) => ({ id, name: m.name, self: id === self, direct: id === self ? true : !!openLink(id) }));
+    h.onRoster(list);
+  }
+
+  function pump() {
+    if (pumping || t.closed) return;
+    pumping = true;
+    const step = () => {
+      if (t.closed) { pumping = false; return; }
+      if (pending < GROUP_PARALLEL && queue.length) {
+        const id = queue.shift();
+        if (!links.has(id)) initiate(id);
+        setTimeout(step, GROUP_SPACING_MS);
+      } else pumping = false;
+    };
+    step();
+  }
+
+  function newEntry(id, counted) {
+    const entry = { id, up: false, counted, L: null, sdp: '', timer: null };
+    if (counted) pending++;
+    entry.L = newLink({
+      onUp: () => {
+        entry.up = true; clearTimeout(entry.timer);
+        if (entry.counted) { entry.counted = false; pending--; }
+        fails.delete(id);
+        publish(); pump(); announce(false, false);
+      },
+      onEnv: env => handleEnv(env),
+      onDown: () => { if (links.get(id) === entry) failLink(id, entry); }
+    });
+    entry.timer = setTimeout(() => { if (!entry.up) failLink(id, entry); }, CONNECT_TIMEOUT_MS);
+    links.set(id, entry);
+    return entry;
+  }
+  function dropLink(id) {
+    const e = links.get(id);
+    if (!e) return;
+    clearTimeout(e.timer);
+    if (e.counted) { e.counted = false; pending--; }
+    links.delete(id);
+    e.L.close();
+  }
+  function failLink(id, entry) {
+    if (links.get(id) !== entry) return;
+    dropLink(id);
+    fails.set(id, (fails.get(id) || 0) + 1);
+    publish(); pump();
+    if (!t.closed) { clearTimeout(retryTimer); retryTimer = setTimeout(evaluate, 4000 + Math.random() * 2000); }
+  }
+
+  async function initiate(id) {
+    const entry = newEntry(id, true);
+    try {
+      entry.L.makeChannel();
+      await entry.L.pc.setLocalDescription(await entry.L.pc.createOffer());
+      await gathered(entry.L.pc, 4000);
+      await relayPost({ t: 'offer', from: self, to: id, sdp: entry.L.pc.localDescription.sdp, sentAt: Date.now() });
+    } catch (e) { failLink(id, entry); }
+  }
+  async function onOffer(p, now) {
+    const id = p.from;
+    if (!members.has(id)) members.set(id, { name: short(id), joinedAt: now, seenAt: now });
+    const adm = admitted(now);
+    if (!adm.has(id) || !adm.has(self)) return;
+    const old = links.get(id);
+    if (old && (old.up || old.sdp === p.sdp)) return;       // already connected, or a replay of the offer we are working on
+    if (old) dropLink(id);
+    const entry = newEntry(id, false);
+    entry.sdp = p.sdp;
+    try {
+      await entry.L.pc.setRemoteDescription({ type: 'offer', sdp: p.sdp });
+      await entry.L.pc.setLocalDescription(await entry.L.pc.createAnswer());
+      await gathered(entry.L.pc, 4000);
+      await relayPost({ t: 'answer', from: self, to: id, sdp: entry.L.pc.localDescription.sdp, sentAt: Date.now() });
+    } catch (e) { failLink(id, entry); }
+  }
+  async function onAnswer(p) {
+    const e = links.get(p.from);
+    if (!e || e.up || e.L.pc.signalingState !== 'have-local-offer') return;
+    try { await e.L.pc.setRemoteDescription({ type: 'answer', sdp: p.sdp }); } catch (err) { failLink(p.from, e); }
+  }
+
+  function helloLoop() {
+    if (t.closed) return;
+    const early = helloStep < HELLO_STEPS.length;
+    const delay = early ? HELLO_STEPS[helloStep] : GROUP_HELLO_MS;
+    helloStep++;
+    helloTimer = setTimeout(() => { announce(early); evaluate(); helloLoop(); }, delay);
+  }
+
+  t.open = () => { chan.start(); publish(); helloLoop(); };
+  t.members = () => active(Date.now()).slice(0, GROUP_MAX).map(([id, m]) => ({ id, name: m.name, self: id === self, direct: id === self || !!openLink(id) }));
+  /* Send one sealed chat envelope to everyone: straight over each open channel, and through the relay for anyone we are not
+   * directly connected to yet (or when nobody is). Receivers drop the duplicate. */
+  t.send = async env => {
+    let sent = 0, missing = false;
+    for (const id of admitted(Date.now())) {
+      if (id === self) continue;
+      const l = openLink(id);
+      if (l) { try { l.L.dc.send(JSON.stringify(env)); sent++; continue; } catch (e) { /* fall through to the relay */ } }
+      missing = true;
+    }
+    if (missing || sent === 0) {
+      if (chan.up()) await chan.post(env);
+      else if (sent === 0) throw offline();
+    }
+  };
+  t.close = () => {
+    if (t.closed) return;
+    const k = getKey();
+    const linksNow = [...links.values()];
+    t.closed = true;
+    clearTimeout(helloTimer); clearTimeout(retryTimer);
+    const teardown = () => { linksNow.forEach(l => l.L.close()); links.clear(); chan.stop(); };
+    if (!k) { teardown(); return; }
+    seal(k, { t: 'bye', from: self, sentAt: Date.now() }).then(env => {
+      for (const l of linksNow) if (l.up && l.L.isOpen()) { try { l.L.dc.send(JSON.stringify(env)); } catch (e) { /* ignore */ } }
+      return chan.up() ? chan.post(env) : null;
+    }).catch(() => {}).then(() => setTimeout(teardown, 400));
+  };
+  return t;
+}
+/* GROUP-END */
+
+/* ---------- page ---------- */
+const $ = id => document.getElementById(id);
+const el = {
+  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), pwToggle: $('pwToggle'), pwHint: $('pwHint'), nick: $('nick'),
+  stun: $('useStun'), turnToken: $('turnToken'), xirIdent: $('xirIdent'), xirSecret: $('xirSecret'), xirChannel: $('xirChannel'),
+  joinBtn: $('joinBtn'), joinStatus: $('joinStatus'),
+  count: $('roomCount'), roster: $('roster'), notice: $('notice'), log: $('log'), empty: $('empty'),
+  send: $('sendForm'), input: $('input'), ttl: $('ttl'), lockBtn: $('lockBtn')
+};
+const IDLE_MS = 5 * 60 * 1000;
+const HIDDEN_WIPE_MS = 2 * 60 * 1000;
+const NOTICE_MS = 8000;
+
+let key = null, roomId = null, session = null, tp = null, timer = null, joining = false;
+let lastActivity = 0, hiddenTimer = null, noticeUntil = 0, messages = [];
+const seen = new Map();
+const nodes = new Map();
+
+function setJoin(text, kind) { el.joinStatus.textContent = text || ''; el.joinStatus.dataset.kind = kind || ''; }
+function notice(text) { el.notice.textContent = text; el.notice.hidden = false; noticeUntil = Date.now() + NOTICE_MS; }
+function clearNotice() { el.notice.hidden = true; el.notice.textContent = ''; noticeUntil = 0; }
+function doneJoining() { joining = false; el.joinBtn.disabled = false; }
+
+function hintFor(a) {
+  if (a.empty) return 'Tip: four or more random words make a strong shared password.';
+  if (a.ok) return 'Looks strong enough. Share it by a different route than this chat.';
+  return 'Heads up: ' + a.notes.join(' ') + ' You can still join, but a guessable password can be cracked offline.';
+}
+function updateHint() {
+  const a = assessPassword(el.pw.value);
+  el.pwHint.textContent = hintFor(a);
+  el.pwHint.dataset.level = a.empty ? '' : (a.ok ? 'ok' : 'weak');
+}
+el.pw.addEventListener('input', updateHint);
+el.pwToggle.addEventListener('click', () => {
+  const show = el.pw.type === 'password';
+  el.pw.type = show ? 'text' : 'password';
+  el.pwToggle.textContent = show ? 'Hide' : 'Show';
+  el.pwToggle.setAttribute('aria-pressed', String(show));
+});
+function resetPasswordField() {
+  el.pw.value = ''; el.pw.type = 'password'; el.pwToggle.textContent = 'Show'; el.pwToggle.setAttribute('aria-pressed', 'false');
+  updateHint();
+}
+updateHint();
+
+/* ---------- joining ---------- */
+async function joinRoom() {
+  if (joining) return;
+  if (!el.pw.value.trim()) { setJoin('Enter the shared password to continue.', 'warn'); el.pw.focus(); return; }
+  joining = true; el.joinBtn.disabled = true;
+  setJoin('Connecting…');
+  if (!window.isSecureContext || !window.crypto || !crypto.subtle) {
+    setJoin('This page must be opened over HTTPS (or from localhost) so the browser allows encryption.', 'bad'); doneJoining(); return;
+  }
+  if (typeof RTCPeerConnection === 'undefined' || typeof EventSource === 'undefined') {
+    setJoin('This browser lacks WebRTC or relay support. Use a current Chrome, Edge, Firefox or Safari.', 'bad'); doneJoining(); return;
+  }
+  useStun = el.stun.checked;
+  turnIce = [];
+  const turnToken = el.turnToken.value.trim();
+  const xir = { ident: el.xirIdent.value.trim(), secret: el.xirSecret.value.trim(), channel: el.xirChannel.value.trim() };
+  el.turnToken.value = ''; el.xirIdent.value = ''; el.xirSecret.value = ''; el.xirChannel.value = '';
+  const turnJobs = [];
+  if (turnToken) turnJobs.push(loadTurn(turnToken));
+  if (xir.ident && xir.secret) turnJobs.push(loadXirsys(xir.ident, xir.secret, xir.channel));
+  if (turnJobs.length) {
+    setJoin('Getting TURN credentials…');
+    turnIce = (await Promise.all(turnJobs)).flat();
+    if (!turnIce.length) {
+      setJoin('The TURN provider gave no credentials (wrong details, no network, or the service blocks browser requests). Continuing without TURN.', 'bad');
+      await new Promise(r => setTimeout(r, 1800));
+    }
+  }
+  setJoin('Deriving keys… this takes a second or two.');
+  await new Promise(r => setTimeout(r, 50));
+  let k;
+  try { k = await deriveKeys('group-room:' + el.pw.value); }   // a different room from the one-to-one chat with the same password
+  catch (e) { setJoin('This browser could not derive keys. Use a current browser over HTTPS.', 'bad'); doneJoining(); return; }
+  resetPasswordField();
+  key = k.key; roomId = k.roomId; session = newId();
+  lastActivity = Date.now();
+  const name = cleanName(el.nick.value) || 'guest-' + session.slice(0, 4);
+  el.nick.value = '';
+  tp = makeGroupTransport(c => makeMultiChannel(roomId, c), () => key, () => session, { name, joinedAt: Date.now() }, {
+    onEnv: onChat,
+    onRoster: renderRoster,
+    onFull: () => lock('full'),
+    onRelay: up => { if (!up && key) notice('Relay connection lost, reconnecting. Direct links keep working.'); },
+    onError: e => {
+      if (e && e.code === 'relay_unreachable') notice('Cannot reach the open relays. Check your connection.');
+      else if (e && e.code) notice('Relay problem (' + e.code + '). Trying again.');
+    }
+  });
+  tp.open();
+  showChat(name);
+  doneJoining();
+}
+el.form.addEventListener('submit', e => { e.preventDefault(); joinRoom(); });
+
+function showChat(name) {
+  el.lock.hidden = true; el.chat.hidden = false;
+  setJoin('');
+  el.empty.hidden = false;
+  notice('You are ' + name + '. Share the password with up to 14 other people. Messages vanish after the time you pick.');
+  clearInterval(timer); timer = setInterval(tick, 1000);
+  el.input.focus();
+}
+
+/* ---------- roster ---------- */
+function renderRoster(list) {
+  el.count.textContent = list.length + ' / ' + GROUP_MAX + ' in the room';
+  el.roster.replaceChildren(...list.map(m => {
+    const li = document.createElement('li');
+    li.className = m.direct ? 'direct' : 'relayed';
+    li.title = m.self ? 'You' : m.direct ? 'Direct connection' : 'Reached through the encrypted relay for now';
+    li.textContent = m.name + (m.self ? ' (you)' : '');
+    return li;
+  }));
+}
+
+/* ---------- messages ---------- */
+function onChat(p) {
+  if (!key) return;
+  const m = acceptIncoming(p, Date.now(), seen);
+  if (!m || m.t !== 'm') return;
+  m.name = cleanName(p.name) || m.from.slice(0, 4);
+  messages.push(m);
+  paint(Date.now());
+}
+async function sendMessage() {
+  const text = el.input.value.trim();
+  if (!text || !key || !tp) return;
+  lastActivity = Date.now();
+  const m = { t: 'm', id: newId(), from: session, name: tp.members().find(x => x.self).name, text, sentAt: Date.now(), ttl: Number(el.ttl.value) || DEFAULT_TTL };
+  el.input.value = '';
+  messages.push({ ...m, mine: true });
+  seen.set('m:' + m.id, Date.now() + (MAX_AGE_SEC + DRIFT_SEC) * 1000);
+  paint(Date.now());
+  try { await tp.send(await seal(key, m)); }
+  catch (e) { notice('Not delivered: nobody is reachable yet. Wait until someone else appears in the room.'); }
+}
+el.send.addEventListener('submit', e => { e.preventDefault(); sendMessage(); });
+el.input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+
+function buildNode(m) {
+  const n = document.createElement('div');
+  n.className = 'msg' + (m.mine ? ' mine' : '');
+  const who = document.createElement('span'); who.className = 'who'; who.textContent = m.mine ? 'You' : m.name;
+  const text = document.createElement('span'); text.className = 'text'; text.textContent = m.text;
+  const left = document.createElement('span'); left.className = 'left';
+  n.append(who, text, left);
+  return n;
+}
+function paint(now) {
+  messages = messages.filter(m => !getState(m, now).expired);
+  const live = new Set(messages.map(m => m.id));
+  for (const [id, n] of nodes) if (!live.has(id)) { n.remove(); nodes.delete(id); }
+  for (const m of messages) {
+    let n = nodes.get(m.id);
+    if (!n) { n = buildNode(m); nodes.set(m.id, n); el.log.append(n); el.log.scrollTop = el.log.scrollHeight; }
+    const st = getState(m, now);
+    n.style.opacity = String(st.opacity);
+    n.querySelector('.left').textContent = Math.ceil(st.remaining) + 's';
+  }
+  el.empty.hidden = messages.length > 0;
+}
+function tick() {
+  if (!key) return;
+  const now = Date.now();
+  if (now - lastActivity > IDLE_MS) { lock('idle'); return; }
+  for (const [k, exp] of seen) if (now > exp) seen.delete(k);
+  paint(now);
+  if (noticeUntil && now > noticeUntil) clearNotice();
+}
+
+/* ---------- locking and wiping ---------- */
+function wipeState() {
+  clearInterval(timer); timer = null;
+  clearTimeout(hiddenTimer); hiddenTimer = null;
+  if (tp) { const t = tp; tp = null; try { t.close(); } catch (e) { /* ignore */ } }
+  key = null; roomId = null; session = null;
+  messages = []; seen.clear(); nodes.clear();
+  el.log.querySelectorAll('.msg').forEach(n => n.remove());
+  el.empty.hidden = false;
+  el.roster.replaceChildren();
+  el.input.value = ''; el.pw.value = ''; el.nick.value = '';
+  el.turnToken.value = ''; el.xirIdent.value = ''; el.xirSecret.value = ''; el.xirChannel.value = '';
+  turnIce = [];
+  clearNotice();
+}
+function lock(reason) {
+  const wasOpen = !!key;
+  wipeState();
+  if (!wasOpen && reason !== 'manual') return;
+  el.chat.hidden = true; el.lock.hidden = false;
+  resetPasswordField();
+  doneJoining();
+  const notes = {
+    idle: 'Locked after 5 minutes without activity. Type the password to rejoin.',
+    hidden: 'Locked because the page was in the background for a while. Type the password to rejoin.',
+    manual: 'Locked. Keys and messages were cleared from this page.',
+    full: 'This group already has ' + GROUP_MAX + ' people, so you were not admitted. Try again when someone leaves.'
+  };
+  setJoin(notes[reason] || '', reason === 'full' ? 'bad' : '');
+}
+el.lockBtn.addEventListener('click', () => lock('manual'));
+['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { lastActivity = Date.now(); }, { passive: true }));
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(hiddenTimer); hiddenTimer = null;
+  if (document.hidden && key) hiddenTimer = setTimeout(() => lock('hidden'), HIDDEN_WIPE_MS);
+});
+window.addEventListener('pagehide', () => { if (key) wipeState(); });
+</script>
 </body>
 </html>

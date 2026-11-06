@@ -21,6 +21,10 @@ Any static host works as long as it serves HTTPS. Locally: `python3 -m http.serv
 
 Open the same file as an artifact. When Claude's room is available, "Automatic" uses it. Everywhere else it never touches `window.claude`.
 
+## Group chat
+
+`group.html` is a room for up to 15 people sharing one password (it is a different room from the one-to-one chat even with the same password). Members find each other through the same open relays, then every pair opens a direct WebRTC link, so each member holds up to 14 links. Messages go straight to every connected member; anyone not linked yet is reached through the encrypted relay and shown once. TURN details (Turnix, Xirsys) work the same way as in the one-to-one chat. The 15 limit is enforced by the pages themselves: the first 15 members by join time are admitted, and anyone else sees "not admitted". That stops honest clients, not someone who already holds the password and runs their own code. All members can see each other's IP address. Keep the password to people you trust.
+
 ## Connection modes
 
 | Mode | Third parties | What they see |
@@ -68,7 +72,7 @@ Metadata and timing, IP addresses (each side sees the other's in a direct link),
 ## Files
 
 - `index.html`: one-to-one chat (the whole app)
-- `group.html`: group chat placeholder page
+- `group.html`: group chat for up to 15 people (full mesh of direct links, same relays and TURN options as the one-to-one chat)
 - `sharing.html`: encrypted file vault
 - `search.html`: archive search page
 - `privacy.html`: privacy policy

@@ -157,6 +157,18 @@ await ok('join form: every connection mode exists and the TURN box follows the c
   assert.match(html, /function syncRoute\(\)/);
   assert.match(html, /route !== 'relay'/);
 });
+await ok('group page: shares the exact core, MQTT and relay code with the chat page, and is capped at 15', () => {
+  for (const name of ['CORE', 'MQTT', 'MULTI']) {
+    assert.equal(block(groupHtml, name), block(html, name), name + ' block differs between index.html and group.html');
+  }
+  assert.match(groupHtml, /const GROUP_MAX = 15;/);
+  const take = (src, re) => src.match(re)[0];
+  for (const re of [/const NTFY_SERVER = [^\n]+/, /const MQTT_BROKERS = [^\n]+/, /const STUN_URLS = [^\n]+/, /const TURN_API = [^\n]+/, /const XIRSYS_HOST = [^\n]+/]) {
+    assert.equal(take(groupHtml, re), take(html, re), 'relay setting differs: ' + re);
+  }
+  assert.deepEqual(connectOf(groupHtml).sort(), connectOf(html).sort(), 'group and chat CSP connect-src differ');
+  assert.ok(!/[a-f0-9]{32}|Bearer [A-Za-z0-9]{16,}/.test(groupHtml.replace(/\b[a-f0-9]{32}\b(?=[^<]*PBKDF)/g, '')), 'a secret appears to be hard-coded in group.html');
+});
 await ok('every vault upload host is allowed by the vault CSP', () => {
   const urls = [...vaultHtml.matchAll(/url:"(https:\/\/[^\"]+)"/g)].map(x => x[1]);
   assert.ok(urls.length > 0, 'no upload host configured');
