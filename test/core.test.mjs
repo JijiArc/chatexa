@@ -7,6 +7,7 @@ const root = existsSync(new URL('./index.html', import.meta.url)) ? './' : '../'
 const html = readFileSync(new URL(root + 'index.html', import.meta.url), 'utf8');
 const vaultHtml = readFileSync(new URL(root + 'sharing.html', import.meta.url), 'utf8');
 const searchHtml = readFileSync(new URL(root + 'search.html', import.meta.url), 'utf8');
+const groupHtml = readFileSync(new URL(root + 'group.html', import.meta.url), 'utf8');
 const block = (src, name) => {
   const r = src.match(new RegExp('/\\* ' + name + '-BEGIN \\*/([\\s\\S]*?)/\\* ' + name + '-END \\*/'));
   assert.ok(r, name + ' block not found');
@@ -92,11 +93,11 @@ const cspOf = src => {
 const connectOf = src => cspOf(src).match(/connect-src ([^;]+)/)[1].split(/\s+/);
 
 await ok('static-hosting rules: no external scripts, CSP present, no wildcards', () => {
-  for (const [name, src] of [['index', html], ['vault', vaultHtml]]) {
+  for (const [name, src] of [['index', html], ['vault', vaultHtml], ['search', searchHtml], ['group', groupHtml]]) {
     assert.ok(!/<script[^>]+src=/i.test(src), name + ': external script found');
     assert.ok(!/<link[^>]+href=["']https?:/i.test(src), name + ': external stylesheet found');
     assert.match(cspOf(src), /default-src 'none'/);
-    assert.ok(!/\*/.test(connectOf(src).join(' ')), name + ': connect-src must not use wildcards');
+    if (/connect-src/.test(cspOf(src))) assert.ok(!/\*/.test(connectOf(src).join(' ')), name + ': connect-src must not use wildcards');
   }
   assert.ok(connectOf(html).includes('https://ntfy.sh'));
 });
@@ -111,6 +112,12 @@ await ok('every MQTT broker is wss and allowed by the CSP', () => {
     assert.equal(url.protocol, 'wss:', u + ' must be wss');
     assert.ok(connect.includes('wss://' + url.host), 'CSP connect-src lacks wss://' + url.host);
   }
+});
+await ok('the search page CSP allows the archive API and each proxy it falls back to', () => {
+  const connect = connectOf(searchHtml);
+  const urls = [...searchHtml.matchAll(/(?:apiBase: *"|"|')(https:\/\/api\.[a-z.]+)/g)].map(m => new URL(m[1]).origin);
+  assert.ok(urls.length >= 3, 'expected the API and two proxies');
+  for (const o of new Set(urls)) assert.ok(connect.includes(o), 'search CSP connect-src lacks ' + o);
 });
 await ok('every vault upload host is allowed by the vault CSP', () => {
   const urls = [...vaultHtml.matchAll(/url:"(https:\/\/[^\"]+)"/g)].map(x => x[1]);
