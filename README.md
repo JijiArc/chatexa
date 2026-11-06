@@ -11,7 +11,7 @@ Two people type the same password; messages are encrypted in the browser (AES-GC
 
 ## Deploy on GitHub Pages
 
-1. Create a repository containing `index.html`, `group.html`, `sharing.html` and `search.html` at the root (they link to each other by relative path, so keep them together).
+1. Create a repository containing `index.html`, `group.html`, `sharing.html`, `search.html` and `privacy.html` at the root (they link to each other by relative path, so keep them together).
 2. Settings, Pages, Source: GitHub Actions or the static root if you publish a single page.
 3. Push to `main`.
 
@@ -71,6 +71,7 @@ Metadata and timing, IP addresses (each side sees the other's in a direct link),
 - `group.html`: group chat placeholder page
 - `sharing.html`: encrypted file vault
 - `search.html`: archive search page
+- `privacy.html`: privacy policy
 - `test/core.test.mjs`: tests for the core logic, hosting rules and page links
 - `LICENSE`: MIT
 - `.github/workflows/test.yml`: runs the tests on every push and pull request

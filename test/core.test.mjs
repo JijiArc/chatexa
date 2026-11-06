@@ -93,7 +93,7 @@ const cspOf = src => {
 const connectOf = src => cspOf(src).match(/connect-src ([^;]+)/)[1].split(/\s+/);
 
 await ok('static-hosting rules: no external scripts, CSP present, no wildcards', () => {
-  for (const [name, src] of [['index', html], ['vault', vaultHtml], ['search', searchHtml], ['group', groupHtml]]) {
+  for (const [name, src] of [['index', html], ['vault', vaultHtml], ['search', searchHtml], ['group', groupHtml], ['privacy', readFileSync(new URL(root + 'privacy.html', import.meta.url), 'utf8')]]) {
     assert.ok(!/<script[^>]+src=/i.test(src), name + ': external script found');
     assert.ok(!/<link[^>]+href=["']https?:/i.test(src), name + ': external stylesheet found');
     assert.match(cspOf(src), /default-src 'none'/);
@@ -373,7 +373,7 @@ await ok('vault: wrong password, any changed byte, and non-vault files are rejec
 });
 
 await ok('every page links to every other page, and no local link is broken', () => {
-  const pages = ['index.html', 'group.html', 'sharing.html', 'search.html'];
+  const pages = ['index.html', 'group.html', 'sharing.html', 'search.html', 'privacy.html'];
   for (const page of pages) {
     assert.ok(existsSync(new URL(root + page, import.meta.url)), page + ' is missing');
     const src = readFileSync(new URL(root + page, import.meta.url), 'utf8');

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+  <title>Secret Room — Privacy Policy</title>
+  <style>
+    :root {
+      --bg: #0a0f1f; --panel: #101a30; --line: #2a3a5c; --text: #e8ecff; --muted: #a6b3d9;
+      --moon: #f3d9a4; --accent: #7d8dff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: start center; padding: 24px 0;
+      background: radial-gradient(circle at top, #182547, var(--bg) 50%); color: var(--text);
+      font: 16px/1.6 system-ui, sans-serif;
+    }
+    .card {
+      width: min(760px, calc(100vw - 32px));
+      background: rgba(16,26,48,0.9); border: 1px solid var(--line); border-radius: 18px;
+      padding: 28px 24px; box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+    }
+    nav { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 18px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+    nav a { color: var(--muted); text-decoration: none; padding: 8px 12px; border-radius: 10px; }
+    nav a.active, nav a:hover { background: rgba(125,141,255,0.12); color: var(--text); }
+    .brand { margin-right: auto; font-weight: 700; color: var(--text); }
+    h1 { margin: 0 0 4px; font-size: clamp(1.8rem, 5vw, 2.6rem); }
+    h2 { margin: 28px 0 6px; font-size: 1.1rem; color: var(--moon); }
+    p, li { color: var(--muted); }
+    ul { padding-left: 1.2em; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+    a { color: var(--accent); }
+    .updated { color: var(--muted); font-size: 14px; margin: 0 0 14px; }
+    .summary { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,0.03); color: var(--text); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 8px; }
+    th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--muted); }
+    th { color: var(--text); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <nav aria-label="Site">
+      <a class="brand" href="index.html">Secret<span style="color: var(--moon)">Room</span></a>
+      <a href="index.html">One-to-one</a>
+      <a href="group.html">Group</a>
+      <a href="sharing.html">File Vault</a>
+      <a href="search.html">Search</a>
+      <a class="active" href="privacy.html" aria-current="page">Privacy</a>
+    </nav>
+
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: 6 November 2026</p>
+
+    <p class="summary">Short version: this project has no server, no accounts, no cookies and no analytics. Your password and messages stay in your browser and are encrypted before they leave it. The free public services it uses to connect people can see technical details such as your IP address, but not what you write.</p>
+
+    <h2>What we collect</h2>
+    <p>Nothing. The project is a set of static pages with no backend that we run. We do not receive, store or log your password, messages, files, searches or IP address. We cannot read your chats or recover a lost password.</p>
+
+    <h2>What stays on your device</h2>
+    <ul>
+      <li>Your password, the keys derived from it and your messages exist only in the page's memory. Locking, closing the tab, 5 minutes of inactivity or 2 minutes in the background wipes them.</li>
+      <li>Messages disappear after the time you pick (5 to 75 seconds).</li>
+      <li>Optional TURN details you type (Turnix token, Xirsys identity, secret and channel) are used once to request temporary credentials, are never saved, and are cleared when you join or lock.</li>
+      <li>The pages use no cookies, local storage, analytics or advertising. On the search page, your search terms appear in the page address in your own browser.</li>
+    </ul>
+
+    <h2>Third-party services involved</h2>
+    <p>The pages talk directly from your browser to public services we do not control. Each can see the technical details of your connection (at least your IP address and the time), and is governed by its own policy.</p>
+    <table>
+      <tr><th>Service</th><th>Used for</th><th>What it can see</th></tr>
+      <tr><td>GitHub Pages</td><td>Hosting these pages</td><td>Your IP address and the pages you load, in its server logs</td></tr>
+      <tr><td>ntfy.sh, broker.emqx.io</td><td>Connecting two people and relay-mode chat</td><td>Encrypted data, room id, timing, size, your IP address. Never the content</td></tr>
+      <tr><td>STUN (stun.cloudflare.com)</td><td>Direct connections across the internet</td><td>Your IP address. Untick the STUN box to avoid it</td></tr>
+      <tr><td>Turnix, Xirsys (only if you add them)</td><td>TURN relay for strict networks</td><td>Your IP address and the encrypted traffic they relay</td></tr>
+      <tr><td>tmpfile.link, uguu.se</td><td>File Vault uploads</td><td>The encrypted file (the name is encrypted too), its size, your IP address. They delete files on their own schedule, for example tmpfile.link after 7 days</td></tr>
+      <tr><td>archivegenocide.com API; api.allorigins.win and api.codetabs.com as fallbacks</td><td>Archive search</td><td>Your search terms and IP address. A fallback proxy can read the request and the reply</td></tr>
+    </table>
+    <p>In a direct link the two people can see each other's IP address, because that is how a direct connection works.</p>
+
+    <h2>What this does not protect against</h2>
+    <p>Metadata and timing, IP addresses, weak or shared passwords, screenshots, malware on your device, and a compromised hosting account that swaps the code. Use four or more random words as the password.</p>
+
+    <h2>Children</h2>
+    <p>This project is not directed at children and does not knowingly collect any personal data from anyone.</p>
+
+    <h2>Changes and contact</h2>
+    <p>If this policy changes, the date above changes with it and the full history is public in the repository. For questions or concerns, open an issue in the project's GitHub repository, <a href="https://github.com/JijiArc/chatexa/issues">github.com/JijiArc/chatexa</a>.</p>
+
+    <p>This page describes how the code works and is not legal advice.</p>
+  </main>
+</body>
+</html>
