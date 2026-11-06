@@ -37,10 +37,22 @@
     @media(max-width:800px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}.result{grid-template-columns:minmax(0,1fr) 145px}}
     @media(max-width:560px){.wrap{padding:0 13px}header{padding:32px 0 18px}.search-row{flex-direction:column}.search-row .btn{width:100%}.filters{grid-template-columns:1fr 1fr}.result{grid-template-columns:1fr}.thumb{width:100%;max-height:210px;aspect-ratio:16/9;grid-row:1}.result h2{font-size:16px}.toolbar{align-items:flex-start}}
     @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+    .sitenav{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;padding-top:14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+    .sitenav a{color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px}
+    .sitenav a:hover,.sitenav a.active{background:var(--panel2);color:var(--text)}
+    .sitenav .brand{margin-right:auto;font-weight:700;color:var(--text);padding-left:0}
+    .sitenav .brand span{color:var(--accent)}
   </style>
 </head>
 <body>
   <div class="notice"><strong>Content advisory:</strong> This archive may contain graphic documentation of violence, death and serious injury. Media previews remain blurred until individually revealed.</div>
+  <nav class="sitenav wrap" aria-label="Site">
+    <a class="brand" href="index.html">Secret<span>Room</span></a>
+    <a href="index.html">One-to-one</a>
+    <a href="group.html">Group</a>
+    <a href="sharing.html">File Vault</a>
+    <a href="search.html" class="active" aria-current="page">Search</a>
+  </nav>
   <header class="wrap">
     <div class="eyebrow">Public documentation archive</div>
     <h1>mem<span class="logo-accent">e</span>nto</h1>

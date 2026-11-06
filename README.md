@@ -11,7 +11,7 @@ Two people type the same password; messages are encrypted in the browser (AES-GC
 
 ## Deploy on GitHub Pages
 
-1. Create a repository containing `index.html`, `core.test.mjs`, `search.html`, `sharing.html`, and optional static pages under `pages/`.
+1. Create a repository containing `index.html`, `group.html`, `sharing.html` and `search.html` at the root (they link to each other by relative path, so keep them together).
 2. Settings, Pages, Source: GitHub Actions or the static root if you publish a single page.
 3. Push to `main`.
 
@@ -38,7 +38,7 @@ Setup messages and relay-mode chat travel over open public relays that need no a
 
 Everything on a relay is an AES-GCM sealed envelope, so the operators and other users of a public broker cannot read it. They can see room ids, timing and sizes.
 
-- Add or change a broker: edit `MQTT_BROKERS` in `index.html` (a `wss://` URL) and add its `host:port` to `connect-src` in the CSP meta tag. `node core.test.mjs` fails if the two disagree.
+- Add or change a broker: edit `MQTT_BROKERS` in `index.html` (a `wss://` URL) and add its `host:port` to `connect-src` in the CSP meta tag. `node test/core.test.mjs` fails if the two disagree.
 - Strict networks: an account-free TURN server is no longer available, so when a direct link is impossible (CGNAT, symmetric NAT) Automatic mode falls back to the encrypted relay after two failed attempts. Chat still works; the relays then see timing and size. If you run your own TURN server, put it in `EXTRA_ICE_SERVERS`.
 - Public services change. They are free and shared, and they can rate-limit or disappear. That is why there is more than one.
 
@@ -61,13 +61,13 @@ Metadata and timing, IP addresses (each side sees the other's in a direct link),
 
 ## Tests
 
-`node core.test.mjs` (Node 20+) checks key derivation, encryption and tamper rejection, replay and clock-drift defences, expiry, the MQTT client and relay fan-out, the File Vault file format, and the static hosting rules.
+`node test/core.test.mjs` (Node 20+) checks key derivation, encryption and tamper rejection, replay and clock-drift defences, expiry, the MQTT client and relay fan-out, the File Vault file format, the static hosting rules, and that every page links to every other page without a broken link.
 
 ## Files
 
-- `index.html`: the whole app
-- `search.html`: archive search page
+- `index.html`: one-to-one chat (the whole app)
+- `group.html`: group chat placeholder page
 - `sharing.html`: encrypted file vault
-- `pages/`: compatibility routes for navigation and optional companion screens
-- `core.test.mjs`: tests for the core logic and hosting rules
+- `search.html`: archive search page
+- `test/core.test.mjs`: tests for the core logic, hosting rules and page links
 - `LICENSE`: MIT
