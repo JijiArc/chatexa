@@ -14,7 +14,7 @@ const block = (src, name) => {
   return r[1];
 };
 const coreSrc = block(html, 'CORE');
-const api = new Function(coreSrc + '\nreturn { deriveKeys, seal, open, acceptIncoming, getState, assessPassword };')();
+const api = new Function(coreSrc + '\nreturn { deriveKeys, seal, open, acceptIncoming, getState, assessPassword, parseIceServers };')();
 
 let n = 0;
 const ok = (name, fn) => Promise.resolve().then(fn).then(() => { n++; console.log('ok  ' + name); });
@@ -118,6 +118,26 @@ await ok('the search page CSP allows the archive API and each proxy it falls bac
   const urls = [...searchHtml.matchAll(/(?:apiBase: *"|"|')(https:\/\/api\.[a-z.]+)/g)].map(m => new URL(m[1]).origin);
   assert.ok(urls.length >= 3, 'expected the API and two proxies');
   for (const o of new Set(urls)) assert.ok(connect.includes(o), 'search CSP connect-src lacks ' + o);
+});
+await ok('Turnix: the API origin is allowed by the CSP and no token is stored in the page', () => {
+  const url = html.match(/const TURN_API = '([^']+)'/);
+  assert.ok(url, 'TURN_API missing');
+  assert.ok(connectOf(html).includes(new URL(url[1]).origin), 'CSP connect-src lacks the Turnix origin');
+  assert.ok(!/Bearer [A-Za-z0-9]{16,}/.test(html), 'a bearer token appears to be hard-coded');
+});
+await ok('Turnix: only well-formed TURN entries are kept, STUN only when asked, junk is dropped', () => {
+  const payload = { iceServers: [
+    { urls: ['stun:stun.turnix.io:3478'] },
+    { username: 'u', credential: 'c', urls: ['turn:eu.turnix.io:3478?transport=udp', 'turns:eu.turnix.io:443?transport=tcp', 'javascript:alert(1)'] },
+    { urls: ['turn:no-credentials.example:3478'] },
+    null, { urls: 'http://evil.example' }
+  ] };
+  const turnOnly = api.parseIceServers(payload, false);
+  assert.equal(turnOnly.length, 1);
+  assert.deepEqual(turnOnly[0].urls, ['turn:eu.turnix.io:3478?transport=udp', 'turns:eu.turnix.io:443?transport=tcp']);
+  assert.equal(api.parseIceServers(payload, true).length, 2);
+  assert.deepEqual(api.parseIceServers(null, true), []);
+  assert.deepEqual(api.parseIceServers({ iceServers: 'x' }, true), []);
 });
 await ok('every vault upload host is allowed by the vault CSP', () => {
   const urls = [...vaultHtml.matchAll(/url:"(https:\/\/[^\"]+)"/g)].map(x => x[1]);

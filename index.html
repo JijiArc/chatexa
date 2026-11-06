@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="icon" href="data:,">
 <!-- Relays: ntfy.sh plus the public MQTT brokers in MQTT_BROKERS below. If you change either, change connect-src to match (the tests check it). -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh wss://broker.emqx.io:8084; img-src data:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh wss://broker.emqx.io:8084 https://turnix.io; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Secret Room Chat</title>
 <style>
 /* One narrow night-sky column. The lock screen and the chat share it, so unlocking changes the content only.
@@ -158,6 +158,11 @@ select.input { padding: 11px 14px; }
         <input type="checkbox" id="useStun" checked>
         <span>Use a STUN server so direct connections work across the internet. Untick for same-network only; the STUN operator then never sees your IP address.</span>
       </label>
+
+      <label class="check" for="turnToken">
+        <span>Optional: Turnix API token for a TURN relay, so direct links also work on strict networks. It stays in this tab's memory, is never saved, and Turnix then sees your IP address.</span>
+      </label>
+      <input class="input" id="turnToken" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Turnix API token (leave empty to skip)">
 
       <button class="primary" id="joinBtn" type="submit">Join room</button>
       <p class="status" id="joinStatus" role="status" aria-live="polite"></p>
@@ -374,6 +379,24 @@ function assessPassword(pw) {
   }
   return { empty: false, ok: notes.length === 0 && (words >= 4 || bits >= 70), notes, words, bits };
 }
+/* Turnix answers { iceServers: [ {urls:[stun...]}, {urls:[turn...], username, credential} ] }. Keep only well-formed entries. */
+function parseIceServers(payload, keepStun) {
+  const list = payload && Array.isArray(payload.iceServers) ? payload.iceServers : [];
+  const out = [];
+  for (const s of list) {
+    if (!s) continue;
+    const urls = (Array.isArray(s.urls) ? s.urls : [s.urls]).filter(u => typeof u === 'string' && /^(stun|turns?):[^\s]+$/.test(u));
+    if (!urls.length) continue;
+    const isTurn = urls.some(u => /^turns?:/.test(u));
+    if (isTurn) {
+      if (typeof s.username !== 'string' || typeof s.credential !== 'string' || !s.username || !s.credential) continue;
+      out.push({ urls: urls.filter(u => /^turns?:/.test(u)), username: s.username, credential: s.credential });
+    } else if (keepStun) {
+      out.push({ urls });
+    }
+  }
+  return out;
+}
 /* CORE-END */
 
 /* ===== Transports =====
@@ -403,8 +426,30 @@ const SIGNAL_MAX_AGE_SEC = 30;
 
 let useStun = true;   // set from the checkbox at join time
 
+/* Optional TURN from Turnix. The token is typed by the person at join time and lives only in this variable's one fetch call;
+ * it is never written to the page, storage or the repository. The credentials it returns expire after TURN_TTL_SEC. */
+const TURN_API = 'https://turnix.io/api/v1/credentials/ice';
+const TURN_TTL_SEC = 3600;
+let turnIce = [];
+
+async function loadTurn(token) {
+  if (!/^[A-Za-z0-9._~+\-]{8,200}$/.test(token)) return [];
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const res = await fetch(TURN_API, {
+      method: 'POST', mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal,
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ttl: TURN_TTL_SEC })
+    });
+    if (!res.ok) return [];
+    return parseIceServers(await res.json(), false);
+  } catch (e) { return []; }
+  finally { clearTimeout(timer); }
+}
+
 function iceConfig() {
-  return { iceServers: [...(useStun ? [{ urls: STUN_URLS }] : []), ...EXTRA_ICE_SERVERS] };
+  return { iceServers: [...(useStun ? [{ urls: STUN_URLS }] : []), ...turnIce, ...EXTRA_ICE_SERVERS] };
 }
 
 function gathered(pc, ms) {
@@ -927,7 +972,7 @@ const RELAY_TAG = 'Encrypted relay mode. Content stays sealed, but the relay see
 
 const $ = id => document.getElementById(id);
 const el = {
-  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), pwToggle: $('pwToggle'), pwHint: $('pwHint'),
+  lock: $('lock'), chat: $('chat'), form: $('joinForm'), pw: $('pw'), turnToken: $('turnToken'), pwToggle: $('pwToggle'), pwHint: $('pwHint'),
   route: $('route'), stun: $('useStun'), joinBtn: $('joinBtn'), joinStatus: $('joinStatus'),
   dot: $('dot'), presence: $('presence'), modeTag: $('modeTag'), lockBtn: $('lockBtn'), notice: $('notice'),
   manual: $('manual'), mBox: $('mBox'), mkInvite: $('mkInvite'), mUse: $('mUse'), mCopy: $('mCopy'), mStatus: $('mStatus'),
@@ -1002,6 +1047,17 @@ async function joinRoom() {
   }
   const p2pOpts = { relayOnly: route === 'relay' || !rtcOk, fallback: route === 'auto' };
   useStun = el.stun.checked;
+  turnIce = [];
+  const turnToken = el.turnToken.value.trim();
+  el.turnToken.value = '';
+  if (turnToken && rtcOk && useMode !== 'claude' && useMode !== 'manual') {
+    setJoin('Getting TURN credentials from Turnix…');
+    turnIce = await loadTurn(turnToken);
+    if (!turnIce.length) {
+      setJoin('Turnix did not give credentials (wrong token, no network, or the service blocks browser requests). Continuing without TURN.', 'bad');
+      await new Promise(r => setTimeout(r, 1800));
+    }
+  }
   setJoin('Deriving keys… this takes a second or two.');
   await new Promise(r => setTimeout(r, 50));   // let the status paint before the heavy work
   let k;
@@ -1207,7 +1263,8 @@ function wipeState() {
   seen.clear(); peerSeen.clear(); nodes.clear();
   el.log.querySelectorAll('.msg').forEach(n => n.remove());
   el.empty.hidden = false;
-  el.input.value = ''; el.pw.value = ''; el.mBox.value = '';
+  el.input.value = ''; el.pw.value = ''; el.mBox.value = ''; el.turnToken.value = '';
+  turnIce = [];
   tickCount = 0; offTicks = 0; noticeUntil = 0;
   el.manual.hidden = true;
   clearNotice(); setManual('');
