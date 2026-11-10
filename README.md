@@ -55,6 +55,7 @@ Everything on a relay is an AES-GCM sealed envelope, so the operators and other 
 
 ## Trust model
 
+- The join form has a Suggest button that fills in six random words (512-word list, 54 bits, drawn with the browser's secure random generator). Share the phrase by a different route than the chat itself.
 - The password never leaves the page. The relay topic and the key both derive from it; each guess costs 600,000 PBKDF2 rounds, so use four or more random words.
 - Public MQTT brokers let anyone list topic names, so other users of the broker can see your room id. Anyone who sees it can test password guesses offline, which makes a strong password matter even more.
 - Setup messages (hello, offer, answer) are AES-GCM sealed, so someone without the password cannot read them or swap in their own connection fingerprint.

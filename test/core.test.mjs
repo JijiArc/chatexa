@@ -14,7 +14,7 @@ const block = (src, name) => {
   return r[1];
 };
 const coreSrc = block(html, 'CORE');
-const api = new Function(coreSrc + '\nreturn { deriveKeys, seal, open, acceptIncoming, getState, assessPassword, parseIceServers, parseXirsys };')();
+const api = new Function(coreSrc + '\nreturn { deriveKeys, seal, open, acceptIncoming, getState, assessPassword, parseIceServers, parseXirsys, generatePassphrase, WORDS };')();
 
 let n = 0;
 const ok = (name, fn) => Promise.resolve().then(fn).then(() => { n++; console.log('ok  ' + name); });
@@ -31,6 +31,20 @@ await ok('same password gives the same room, different password a different one'
 await ok('seal/open round trip', async () => {
   const e = await api.seal(a.key, { t: 'm', text: 'hi' });
   assert.deepEqual(await api.open(a2.key, e.iv, e.ct), { t: 'm', text: 'hi' });
+});
+await ok('passphrase suggestion: 512 distinct plain words, six per phrase, rated strong, and different each time', () => {
+  assert.equal(api.WORDS.length, 512);
+  assert.equal(new Set(api.WORDS).size, 512);
+  assert.ok(api.WORDS.every(w => /^[a-z]{3,}$/.test(w)));
+  const seen = new Set();
+  for (let i = 0; i < 50; i++) {
+    const p = api.generatePassphrase(6);
+    assert.equal(p.split(' ').length, 6);
+    assert.ok(api.assessPassword(p).ok, p);
+    seen.add(p);
+  }
+  assert.equal(seen.size, 50);
+  assert.equal(api.generatePassphrase(1).split(' ').length, 4);
 });
 await ok('wrong key and tampering are rejected', async () => {
   const e = await api.seal(a.key, { x: 1 });

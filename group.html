@@ -95,6 +95,7 @@
         <div class="pwrow">
           <input class="input" id="pw" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Four or more random words" aria-describedby="pwHint">
           <button class="ghost" id="pwToggle" type="button" aria-pressed="false">Show</button>
+          <button class="ghost" id="pwSuggest" type="button" aria-label="Suggest a random six-word password">Suggest</button>
         </div>
         <p class="hint" id="pwHint" aria-live="polite"></p>
 
@@ -316,6 +317,51 @@ function parseXirsys(payload, keepStun) {
   const raw = payload.v.iceServers;
   const list = Array.isArray(raw) ? raw : raw && typeof raw === 'object' ? [raw] : [];
   return parseIceServers({ iceServers: list }, keepStun);
+}
+/* Passphrase suggestion: 512 plain words, 9 bits each, drawn with the browser's CSPRNG (rejection-free: 512 divides 65536). Six words is 54 bits. */
+const WORDS = (
+  'otter badger falcon heron lynx moose newt owl panda quail raven seal tiger turtle walrus '
+  + 'weasel yak zebra beaver bison camel cobra crane donkey eagle ferret finch gecko goat hare '
+  + 'hawk ibis koala lemur llama lizard mole mouse orca parrot pigeon puffin rabbit robin '
+  + 'salmon shark sloth snail spider stork swan toad trout vole whale wolf wombat gopher jaguar '
+  + 'marmot osprey panther penguin pelican dolphin cricket beetle hornet rooster sparrow condor '
+  + 'gazelle river lake ocean pond creek meadow forest desert canyon valley island glacier '
+  + 'volcano harbor cliff cave dune reef marsh swamp tundra prairie hill ridge peak summit '
+  + 'shore beach coast delta fjord spring brook stream cloud storm breeze thunder rain snow '
+  + 'frost mist fog dawn dusk sunset sunrise moon star comet planet galaxy orbit meteor aurora '
+  + 'rainbow ember flame spark maple willow cedar pine birch oak elm aspen palm bamboo fern '
+  + 'moss ivy clover daisy tulip lily rose orchid lotus poppy violet iris jasmine lavender sage '
+  + 'mint basil thyme ginger pepper garlic onion carrot potato tomato cabbage lettuce radish '
+  + 'turnip pumpkin melon mango peach pear apple cherry plum lemon lime bread butter cheese '
+  + 'honey sugar salt flour noodle rice bean corn oat walnut almond cashew peanut cocoa coffee '
+  + 'tea soup stew pasta pizza taco burger salad cookie cake candy jelly syrup waffle pancake '
+  + 'muffin biscuit pretzel cracker yogurt cream olive raisin fig date pickle anchor basket '
+  + 'bottle bridge bucket button candle canvas castle chair clock compass cradle curtain drum '
+  + 'engine fabric feather fence flute garden hammer helmet hammock kettle ladder lantern lock '
+  + 'magnet mirror needle paddle pencil pillow pocket puzzle quilt ribbon rocket saddle '
+  + 'scissors shovel signal spoon statue sticker tablet teapot ticket tunnel umbrella violin '
+  + 'wagon wallet window wheel whistle blanket bicycle balloon backpack camera carpet cushion '
+  + 'diamond envelope globe guitar harp jacket journal key map marble medal mitten notebook '
+  + 'paper piano pottery radio ring rope ruler sandal scarf shelf sock stamp sweater table '
+  + 'trumpet vase amber azure bronze copper crimson golden indigo ivory jade scarlet silver '
+  + 'coral teal brave calm clever eager gentle happy jolly kind lucky merry noble proud quick '
+  + 'quiet silent swift wise witty bright cosmic crisp dizzy fuzzy glossy humble mellow nimble '
+  + 'rustic sunny tidy vivid woolly zesty arrow bell bench boat brush cabin cart chalk coin '
+  + 'crown dish door drawer fork frame gate glove hat hook lamp leaf mask mug nest oar pan '
+  + 'pearl plate pole rail roof sail shell shield ship sled spade stone stool sword tent tool '
+  + 'tower toy train tray vest wing yarn zipper acorn apron attic barn barrel cobweb comb cork '
+  + 'dagger fiddle flag funnel goblet jigsaw kite locket mallet nutmeg oven pebble pillar plank '
+  + 'puppet racket rattle scooter shuttle skate spiral thimble trophy truffle velvet whisk '
+  + 'wicker bakery cafe campus circus cottage farm garage lagoon library market museum orchard '
+  + 'palace park plaza pier ranch studio temple theater village workshop april august friday '
+  + 'monday sunday winter summer autumn season banjo cello opera choir melody rhythm tango '
+  + 'waltz jazz cobalt flint granite quartz opal topaz ruby sapphire pewter nickel zinc atlas '
+  + 'bishop captain knight pilot sailor scout wizard pirate farmer baker tailor'
+).split(' ');
+function generatePassphrase(count) {
+  const n = Math.max(4, count | 0 || 6);
+  const r = crypto.getRandomValues(new Uint16Array(n));
+  return Array.from(r, v => WORDS[v % WORDS.length]).join(' ');
 }
 /* CORE-END */
 
@@ -939,6 +985,16 @@ el.pwToggle.addEventListener('click', () => {
   el.pw.type = show ? 'text' : 'password';
   el.pwToggle.textContent = show ? 'Hide' : 'Show';
   el.pwToggle.setAttribute('aria-pressed', String(show));
+});
+$('pwSuggest').addEventListener('click', () => {
+  el.pw.value = generatePassphrase(6);
+  el.pw.type = 'text';
+  el.pwToggle.textContent = 'Hide';
+  el.pwToggle.setAttribute('aria-pressed', 'true');
+  el.pwToggle.setAttribute('aria-label', 'Hide password');
+  updateHint();
+  setJoin('Six random words, shown on screen. Write them down and give them to the other side by a different route than this chat.', '');
+  el.pw.focus();
 });
 function resetPasswordField() {
   el.pw.value = ''; el.pw.type = 'password'; el.pwToggle.textContent = 'Show'; el.pwToggle.setAttribute('aria-pressed', 'false');
