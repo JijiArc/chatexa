@@ -2,6 +2,7 @@
 // Extracts the pure core, the relay channels and the vault format from the pages and checks them.
 import { readFileSync, existsSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { createECDH } from 'node:crypto';
 
 const root = existsSync(new URL('./index.html', import.meta.url)) ? './' : '../';
 const html = readFileSync(new URL(root + 'index.html', import.meta.url), 'utf8');
@@ -413,6 +414,74 @@ await ok('every page links to every other page, and no local link is broken', ()
       assert.ok(navHtml.includes('href="' + other + '"'), page + ' nav does not link to ' + other);
     }
   }
+});
+
+/* ---------- online light ---------- */
+const presenceApi = new Function(coreSrc + block(html, 'PRESENCE') + '\nreturn { presenceKeys, presenceSignKey, presenceVerifyKey, presenceSign, presenceNew, presenceAccept, presenceOnline, PRESENCE_ONLINE_MS, PRESENCE_SKEW_MS, PRESENCE_TOPIC, PRESENCE_BEAT_MS, b64u };')();
+const ownerKeys = await presenceApi.presenceKeys('plum river anchor stone');
+const otherKeys = await presenceApi.presenceKeys('some other four words');
+const ownerSign = await presenceApi.presenceSignKey(ownerKeys);
+const otherSign = await presenceApi.presenceSignKey(otherKeys);
+const ownerVerify = await presenceApi.presenceVerifyKey({ x: ownerKeys.x, y: ownerKeys.y });
+const T0 = 1_700_000_000_000;
+
+await ok('presence: the public key computed in the page matches Node\'s own P-256 maths', async () => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.setPrivateKey(Buffer.from(ownerKeys.d, 'base64url'));
+  const pub = ecdh.getPublicKey();
+  assert.equal(pub.length, 65);
+  assert.equal(presenceApi.b64u(pub.subarray(1, 33)), ownerKeys.x);
+  assert.equal(presenceApi.b64u(pub.subarray(33, 65)), ownerKeys.y);
+  assert.equal((await presenceApi.presenceKeys('  plum river anchor stone ')).x, ownerKeys.x);
+  assert.notEqual(otherKeys.x, ownerKeys.x);
+});
+await ok('presence: a signed beat turns the light on, and it times out', async () => {
+  const st = presenceApi.presenceNew();
+  assert.equal(presenceApi.presenceOnline(st, T0), false);
+  assert.ok(await presenceApi.presenceAccept(st, ownerVerify, await presenceApi.presenceSign(ownerSign, true, T0), T0 + 300));
+  assert.equal(presenceApi.presenceOnline(st, T0 + 5000), true);
+  assert.equal(presenceApi.presenceOnline(st, T0 + 300 + presenceApi.PRESENCE_ONLINE_MS - 1), true);
+  assert.equal(presenceApi.presenceOnline(st, T0 + 300 + presenceApi.PRESENCE_ONLINE_MS), false);
+  assert.ok(presenceApi.PRESENCE_ONLINE_MS >= 3 * presenceApi.PRESENCE_BEAT_MS, 'a missed beat or two must not flip the light');
+});
+await ok('presence: a beat signed with another password, or altered, is ignored', async () => {
+  const st = presenceApi.presenceNew();
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, await presenceApi.presenceSign(otherSign, true, T0), T0), false);
+  const good = await presenceApi.presenceSign(ownerSign, false, T0);
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, { ...good, p: 1 }, T0), false, 'flipping off to on');
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, { ...good, t: T0 + 1 }, T0), false, 'changed timestamp');
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, { p: 1, t: T0, s: 'AAAA' }, T0), false);
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, { p: 1, t: T0 }, T0), false);
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, null, T0), false);
+  assert.equal(presenceApi.presenceOnline(st, T0), false);
+});
+await ok('presence: replays, duplicates, stale and future beats are ignored', async () => {
+  const st = presenceApi.presenceNew();
+  const b1 = await presenceApi.presenceSign(ownerSign, true, T0);
+  const b2 = await presenceApi.presenceSign(ownerSign, true, T0 + 20000);
+  assert.ok(await presenceApi.presenceAccept(st, ownerVerify, b2, T0 + 20000));
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, b2, T0 + 20100), false, 'same beat from a second relay');
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, b1, T0 + 20100), false, 'older beat replayed');
+  const stale = await presenceApi.presenceSign(ownerSign, true, T0 + 30000 - presenceApi.PRESENCE_SKEW_MS - 5000);
+  assert.equal(await presenceApi.presenceAccept(presenceApi.presenceNew(), ownerVerify, stale, T0 + 30000), false, 'too old for this clock');
+  const future = await presenceApi.presenceSign(ownerSign, true, T0 + 30000 + presenceApi.PRESENCE_SKEW_MS + 5000);
+  assert.equal(await presenceApi.presenceAccept(presenceApi.presenceNew(), ownerVerify, future, T0 + 30000), false, 'too far ahead');
+});
+await ok('presence: the pre-signed offline beat switches the light off, and an old on-beat cannot switch it back', async () => {
+  const st = presenceApi.presenceNew();
+  const on = await presenceApi.presenceSign(ownerSign, true, T0);
+  const off = await presenceApi.presenceSign(ownerSign, false, T0 + 1);
+  assert.ok(await presenceApi.presenceAccept(st, ownerVerify, on, T0));
+  assert.ok(await presenceApi.presenceAccept(st, ownerVerify, off, T0 + 500));
+  assert.equal(presenceApi.presenceOnline(st, T0 + 1000), false);
+  assert.equal(await presenceApi.presenceAccept(st, ownerVerify, on, T0 + 1000), false);
+  assert.equal(presenceApi.presenceOnline(st, T0 + 1000), false);
+});
+await ok('presence: the page only shows the light when PRESENCE_PUB is set, and uses a configured broker', () => {
+  const m = html.match(/const PRESENCE_PUB = (null|\{ x: '([\w-]{43})', y: '([\w-]{43})' \});/);
+  assert.ok(m, 'PRESENCE_PUB must be null or { x, y } with two 43-character base64url values');
+  assert.match(html, /makeMqttChannel\(url, PRESENCE_TOPIC/);
+  assert.ok(!/PRESENCE_PUB\s*=\s*\{[^}]*\bd\b\s*:/.test(html), 'never put the private scalar d in the page');
 });
 
 console.log(`\n${n} checks passed`);

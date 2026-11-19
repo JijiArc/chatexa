@@ -25,6 +25,16 @@ Open the same file as an artifact. When Claude's room is available, "Automatic" 
 
 `group.html` is a room for up to 15 people sharing one password (it is a different room from the one-to-one chat even with the same password). Members find each other through the same open relays, then every pair opens a direct WebRTC link, so each member holds up to 14 links. Messages go straight to every connected member; anyone not linked yet is reached through the encrypted relay and shown once. TURN details (Turnix, Xirsys) work the same way as in the one-to-one chat. The 15 limit is enforced by the pages themselves: the first 15 members by join time are admitted, and anyone else sees "not admitted". That stops honest clients, not someone who already holds the password and runs their own code. All members can see each other's IP address. Keep the password to people you trust.
 
+## Online light ("i'm here baby")
+
+The one-to-one page can show a green light on its lock screen, before anyone types a password, while the owner is online.
+
+- **Owner:** open "Owner: show that I'm online", type the presence password, press the button, and keep the page open. The light goes off about a minute after the page is closed, or at once when you press Stop or close the tab. The presence password is not the room password.
+- **Everyone else:** just opening the page is enough. A fresh page says "Checking…" for a moment, then "i'm here baby" with a green dot, or "offline".
+- **How it works:** the presence password is turned into an ECDSA P-256 key (PBKDF2, 600,000 rounds). Only the public half is in `index.html` (`PRESENCE_PUB`). The owner's page signs a small beat every 20 seconds and publishes it on the open MQTT topic `chatexa/v2/presence-v1`; every page checks the signature, so nobody can fake the light without the password. Old, repeated or future-dated beats are ignored. A beat contains only an on/off flag, a timestamp and a signature: no room id, no room password, no message content.
+- **One-time setup:** while `PRESENCE_PUB` is `null` the light is off and the page shows "Owner: set up the online light". Type a new presence password there, press "Create public key", and replace the `const PRESENCE_PUB = null;` line in `index.html` with the line it prints. That line is public and safe to commit.
+- **Limits:** anyone who sees the page can see when the owner is online, so use it only where that is fine. Anyone can try password guesses against the public key offline, so use four or more random words. Browsers pause timers in background tabs, and phones may suspend them, so keep the owner's tab in the foreground to stay green. The visitor's and owner's clocks must be within about two minutes of each other.
+
 ## Connection modes
 
 | Mode | Third parties | What they see |
@@ -72,7 +82,7 @@ Metadata and timing, IP addresses (each side sees the other's in a direct link),
 
 ## Files
 
-- `index.html`: one-to-one chat (the whole app)
+- `index.html`: one-to-one chat (the whole app, including the online light)
 - `group.html`: group chat for up to 15 people (full mesh of direct links, same relays and TURN options as the one-to-one chat)
 - `sharing.html`: encrypted file vault
 - `search.html`: archive search page

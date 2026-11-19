@@ -72,6 +72,10 @@ select.input { padding: 11px 12px; }
 .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #55555e; }
 .dot[data-state="on"] { background: var(--ok); }
 .dot[data-state="bad"] { background: var(--bad); }
+/* online light on the lock screen: anyone who opens the page can see it, before any password */
+.beacon { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--ink-dim); }
+.beacon .dot { width: 10px; height: 10px; }
+.beacon[data-state="on"] { color: var(--ok); font-weight: 600; }
 .lockbtn { min-height: 40px; padding: 0 16px; background: transparent; border: 1px solid var(--bad); border-radius: 8px; color: var(--bad); cursor: pointer; }
 .lockbtn:hover { background: var(--bad); color: #1a0b0b; }
 .tag { margin: 0; font-size: 12.5px; color: var(--ink-dim); }
@@ -124,6 +128,7 @@ select.input { padding: 11px 12px; }
   </nav>
   <section class="lock" id="lock" aria-labelledby="title">
     <h1 id="title">Secret Room</h1>
+    <p class="beacon" id="beacon" data-state="" hidden><span class="dot" id="beaconDot" aria-hidden="true"></span><span id="beaconText" role="status" aria-live="polite">Checking…</span></p>
     <p class="lede">Two people, one shared password. Messages are encrypted in your browser, travel directly between the two of you, and vanish after the time you pick, up to 75 seconds.</p>
 
     <form id="joinForm" class="field" autocomplete="off" novalidate>
@@ -161,6 +166,30 @@ select.input { padding: 11px 12px; }
       <button class="primary" id="joinBtn" type="submit">Join room</button>
       <p class="status" id="joinStatus" role="status" aria-live="polite"></p>
     </form>
+
+    <details class="turn-box" id="presenceBox" hidden>
+      <summary>Owner: show that I'm online</summary>
+      <form class="turn-fields" id="presenceForm" autocomplete="off" novalidate>
+        <p class="hint">Type your presence password to switch the green light on for everyone who opens this page. It is a different password from the room password. Keep this page open; the light goes off a minute or so after you close it or press Stop.</p>
+        <input class="input" id="presencePw" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Presence password" aria-label="Presence password">
+        <div class="mrow">
+          <button class="ghost" id="presenceBtn" type="submit">Show I'm online</button>
+          <button class="ghost" id="presenceStop" type="button" hidden>Stop</button>
+        </div>
+        <p class="status" id="presenceStatus" role="status" aria-live="polite"></p>
+      </form>
+    </details>
+
+    <details class="turn-box" id="presenceSetup" hidden>
+      <summary>Owner: set up the online light (one time)</summary>
+      <div class="turn-fields">
+        <p class="hint">The light is off until the page holds your public key. Choose a presence password (four or more random words), press the button, and put the line it shows into the page code as PRESENCE_PUB. The line is public and safe to share; the password is not stored or sent anywhere.</p>
+        <input class="input" id="setupPw" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="New presence password" aria-label="New presence password">
+        <button class="ghost" id="setupBtn" type="button">Create public key</button>
+        <textarea class="input" id="setupOut" rows="3" readonly spellcheck="false" aria-label="Public key line" hidden></textarea>
+        <p class="status" id="setupStatus" role="status" aria-live="polite"></p>
+      </div>
+    </details>
 
     <details class="limits" open>
       <summary>What this protects, and what it doesn't</summary>
@@ -444,6 +473,99 @@ function generatePassphrase(count) {
   return Array.from(r, v => WORDS[v % WORDS.length]).join(' ');
 }
 /* CORE-END */
+
+/* PRESENCE-BEGIN */
+/* ===== Online light. Pure logic, no DOM, no transport. =====
+ * The owner types a presence password. It becomes an ECDSA P-256 private key (PBKDF2, 600,000 rounds); only the PUBLIC key lives in
+ * this file. The owner's page signs a small "I'm here" beat every 20 seconds and publishes it on an open MQTT topic. Every visitor's
+ * page checks the signature against PRESENCE_PUB, so nobody can fake the light without the password, and the password never leaves
+ * the owner's page. The beat carries no room id, no room password and no message content. */
+const PRESENCE_PUB = null;   // { x: '...', y: '...' } from the one-time setup box on the page. null keeps the light switched off.
+const PRESENCE_SALT = 'secret-room-chat/presence/v1';
+const PRESENCE_TOPIC = 'presence-v1';
+const PRESENCE_BEAT_MS = 20000;      // owner beats this often
+const PRESENCE_ONLINE_MS = 75000;    // a visitor shows green for this long after the last accepted beat
+const PRESENCE_SKEW_MS = 120000;     // a beat whose own timestamp is further from the visitor's clock than this is ignored (replay defence)
+const P256_P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn;
+const P256_N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+const P256_G = [0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296n, 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5n];
+
+function b64u(x) { return toB64(x).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+function bytesToBig(b) { let n = 0n; for (let i = 0; i < b.length; i++) n = (n << 8n) | BigInt(b[i]); return n; }
+function bigToBytes(n, len) {
+  const out = new Uint8Array(len);
+  for (let i = len - 1; i >= 0; i--) { out[i] = Number(n & 255n); n >>= 8n; }
+  return out;
+}
+/* Just enough P-256 arithmetic to turn a private scalar into its public point (WebCrypto cannot do that step). Used once per
+ * password, so speed and constant-time behaviour do not matter. */
+function ecMod(a, m) { const r = a % m; return r >= 0n ? r : r + m; }
+function ecInv(a, m) {
+  let lo = ecMod(a, m), hi = m, x0 = 1n, x1 = 0n;
+  while (hi) { const q = lo / hi; [lo, hi] = [hi, lo - q * hi]; [x0, x1] = [x1, x0 - q * x1]; }
+  return ecMod(x0, m);
+}
+function ecAdd(A, B) {
+  if (!A) return B;
+  if (!B) return A;
+  const [x1, y1] = A, [x2, y2] = B;
+  let l;
+  if (x1 === x2) {
+    if (ecMod(y1 + y2, P256_P) === 0n) return null;
+    l = ecMod(3n * x1 * x1 - 3n, P256_P) * ecInv(2n * y1, P256_P) % P256_P;
+  } else l = ecMod(y2 - y1, P256_P) * ecInv(x2 - x1, P256_P) % P256_P;
+  const x3 = ecMod(l * l - x1 - x2, P256_P);
+  return [x3, ecMod(l * (x1 - x3) - y1, P256_P)];
+}
+function ecMul(k, A) {
+  let r = null, q = A;
+  while (k > 0n) { if (k & 1n) r = ecAdd(r, q); q = ecAdd(q, q); k >>= 1n; }
+  return r;
+}
+
+/* password -> { d, x, y } as base64url. d is private; x and y are the public key that goes into PRESENCE_PUB. */
+async function presenceKeys(password) {
+  const pw = enc.encode(String(password).normalize('NFKC').trim());
+  const salt = viewBytes(await crypto.subtle.digest('SHA-256', concatBytes(enc.encode(PRESENCE_SALT), new Uint8Array([0]), pw)));
+  const base = await crypto.subtle.importKey('raw', pw, 'PBKDF2', false, ['deriveBits']);
+  const bits = viewBytes(await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations: PBKDF2_ITERATIONS }, base, 384));
+  const d = bytesToBig(bits) % (P256_N - 1n) + 1n;      // 1 .. n-1
+  bits.fill(0); pw.fill(0);
+  const pt = ecMul(d, P256_G);
+  return { d: b64u(bigToBytes(d, 32)), x: b64u(bigToBytes(pt[0], 32)), y: b64u(bigToBytes(pt[1], 32)) };
+}
+const presenceBytes = (p, t) => enc.encode('presence/v1|' + p + '|' + t);
+function presenceSignKey(k) {
+  return crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: k.x, y: k.y, d: k.d, ext: true },
+    { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+}
+function presenceVerifyKey(pub) {
+  return crypto.subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x: pub.x, y: pub.y, ext: true },
+    { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+}
+async function presenceSign(signKey, on, now) {
+  const p = on ? 1 : 0;
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, signKey, presenceBytes(p, now));
+  return { p, t: now, s: toB64(sig) };
+}
+async function presenceCheck(verifyKey, m) {
+  try { return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, verifyKey, fromB64(m.s), presenceBytes(m.p, m.t)); }
+  catch (e) { return false; }
+}
+/* A visitor's view of the owner. Only beats that pass every check change it. */
+function presenceNew() { return { on: false, lastT: 0, lastRx: 0 }; }
+async function presenceAccept(st, verifyKey, m, now) {
+  if (!m || typeof m !== 'object' || (m.p !== 0 && m.p !== 1) || !Number.isFinite(m.t) || typeof m.s !== 'string' || m.s.length > 200) return false;
+  if (Math.abs(now - m.t) > PRESENCE_SKEW_MS) return false;   // stale or from the future
+  if (m.t <= st.lastT) return false;                          // replay, duplicate from a second relay, or out of order
+  if (!(await presenceCheck(verifyKey, m))) return false;
+  if (m.t <= st.lastT) return false;                          // another copy was accepted while this one was being checked
+  st.lastT = m.t; st.on = m.p === 1; st.lastRx = now;
+  return true;
+}
+function presenceOnline(st, now) { return st.on && now - st.lastRx < PRESENCE_ONLINE_MS; }
+/* PRESENCE-END */
 
 /* ===== Transports =====
  * A transport moves opaque encrypted envelopes {iv, ct} between exactly two browsers.
@@ -1419,6 +1541,123 @@ el.mCopy.addEventListener('click', async () => {
   catch (e) { el.mBox.select(); setManual('Select the text and copy it by hand.', 'warn'); }
 });
 
+/* ---------- online light ---------- */
+/* Everyone who opens the page listens on one open MQTT topic and shows the green light while valid, signed beats keep arriving.
+ * The owner's page (after typing the presence password) is the only thing that can produce them. See PRESENCE-BEGIN. */
+const pe = {
+  beacon: $('beacon'), dot: $('beaconDot'), text: $('beaconText'),
+  box: $('presenceBox'), form: $('presenceForm'), pw: $('presencePw'), btn: $('presenceBtn'), stop: $('presenceStop'), status: $('presenceStatus'),
+  setup: $('presenceSetup'), setupPw: $('setupPw'), setupBtn: $('setupBtn'), setupOut: $('setupOut'), setupStatus: $('setupStatus')
+};
+const PRESENCE_CHECKING_MS = 25000;   // how long a fresh page says "Checking…" before it says "offline"
+let presChans = [], presVerify = null, presState = presenceNew(), presWatchAt = 0;
+let presSignKey = null, presTimer = null, presQTimer = null, presAnswerAt = 0, presOffMsg = null;
+
+function setPresenceStatus(text, kind) { pe.status.textContent = text || ''; pe.status.dataset.kind = kind || ''; }
+function paintBeacon() {
+  const now = Date.now();
+  const on = presenceOnline(presState, now);
+  let text = 'offline', state = '';
+  if (on) { text = "i'm here baby"; state = 'on'; }
+  else if (presState.lastRx === 0 && now - presWatchAt < PRESENCE_CHECKING_MS) text = 'Checking…';
+  pe.text.textContent = text;
+  pe.dot.dataset.state = state;
+  pe.beacon.dataset.state = state;
+}
+function presencePost(msg) {
+  for (const ch of presChans) { try { ch.post(msg).catch(() => {}); } catch (e) { /* relay not ready */ } }
+}
+function onPresenceEnv(env) {
+  if (!env || typeof env !== 'object') return;
+  if (env.q === 1) {                                   // a visitor just arrived and asks for a beat now
+    if (!presSignKey || presQTimer) return;            // not showing as online, or a beat is already queued for the asker
+    presQTimer = setTimeout(() => { presQTimer = null; presenceBeat(); }, Math.max(0, presAnswerAt + 1500 - Date.now()));   // at most one extra beat per 1.5 s
+    return;
+  }
+  if (!presVerify) return;
+  presenceAccept(presState, presVerify, env, Date.now()).then(changed => { if (changed) paintBeacon(); }).catch(() => {});
+}
+async function presenceBeat() {
+  const k = presSignKey;
+  if (!k) return;
+  presAnswerAt = Date.now();
+  try {
+    const now = Date.now();
+    const on = await presenceSign(k, true, now);
+    const off = await presenceSign(k, false, now + 1);   // kept ready so closing the tab can switch the light off at once
+    if (k !== presSignKey) return;
+    presOffMsg = off;
+    presencePost(on);
+  } catch (e) { /* signing failed: the next beat tries again */ }
+}
+function presenceStop(quiet) {
+  clearInterval(presTimer); presTimer = null;
+  clearTimeout(presQTimer); presQTimer = null;
+  if (presSignKey && presOffMsg) presencePost(presOffMsg);
+  presSignKey = null; presOffMsg = null;
+  pe.stop.hidden = true; pe.btn.hidden = false; pe.pw.hidden = false;
+  if (!quiet) setPresenceStatus('The light is off.');
+}
+async function presenceStart() {
+  if (!PRESENCE_PUB || presSignKey) return;
+  if (!pe.pw.value.trim()) { setPresenceStatus('Type the presence password first.', 'warn'); pe.pw.focus(); return; }
+  pe.btn.disabled = true;
+  setPresenceStatus('Checking the password… this takes a second or two.');
+  await new Promise(r => setTimeout(r, 50));
+  let k;
+  try { k = await presenceKeys(pe.pw.value); }
+  catch (e) { setPresenceStatus('This browser could not derive keys. Use a current browser over HTTPS.', 'bad'); pe.btn.disabled = false; return; }
+  pe.pw.value = '';
+  if (k.x !== PRESENCE_PUB.x || k.y !== PRESENCE_PUB.y) { setPresenceStatus('That is not the presence password.', 'bad'); pe.btn.disabled = false; return; }
+  try { presSignKey = await presenceSignKey(k); }
+  catch (e) { setPresenceStatus('This browser could not use the key.', 'bad'); pe.btn.disabled = false; return; }
+  pe.btn.disabled = false; pe.btn.hidden = true; pe.pw.hidden = true; pe.stop.hidden = false;
+  setPresenceStatus("You are showing as online. Keep this page open; it is shown to everyone who opens it.", '');
+  await presenceBeat();
+  presTimer = setInterval(presenceBeat, PRESENCE_BEAT_MS);
+}
+async function presenceCreateKey() {
+  if (!pe.setupPw.value.trim()) { pe.setupStatus.textContent = 'Type a presence password first.'; pe.setupStatus.dataset.kind = 'warn'; return; }
+  const a = assessPassword(pe.setupPw.value);
+  pe.setupBtn.disabled = true;
+  pe.setupStatus.textContent = 'Working… this takes a second or two.'; pe.setupStatus.dataset.kind = '';
+  await new Promise(r => setTimeout(r, 50));
+  try {
+    const k = await presenceKeys(pe.setupPw.value);
+    pe.setupOut.value = "const PRESENCE_PUB = { x: '" + k.x + "', y: '" + k.y + "' };";
+    pe.setupOut.hidden = false;
+    pe.setupStatus.textContent = a.ok ? 'Done. Put this line into the page code to replace the PRESENCE_PUB line.'
+      : 'Done, but ' + a.notes.join(' ').toLowerCase() + ' Anyone can try guesses against the public key, so a stronger phrase is safer.';
+    pe.setupStatus.dataset.kind = a.ok ? '' : 'warn';
+  } catch (e) { pe.setupStatus.textContent = 'This browser could not derive keys. Use a current browser over HTTPS.'; pe.setupStatus.dataset.kind = 'bad'; }
+  pe.setupPw.value = '';
+  pe.setupBtn.disabled = false;
+}
+function startBeaconWatch() {
+  if (!window.isSecureContext || !window.crypto || !crypto.subtle || typeof BigInt === 'undefined') return;
+  if (!PRESENCE_PUB) { pe.setup.hidden = false; return; }
+  presenceVerifyKey(PRESENCE_PUB).then(vk => {
+    presVerify = vk;
+    presWatchAt = Date.now();
+    pe.beacon.hidden = false; pe.box.hidden = false;
+    for (const url of MQTT_BROKERS) {
+      const ch = makeMqttChannel(url, PRESENCE_TOPIC, {
+        onEnv: onPresenceEnv,
+        onState: up => { if (up) { try { ch.post({ q: 1 }).catch(() => {}); } catch (e) { /* not ready */ } } },   // ask the owner for a beat right away
+        onFail: () => {}
+      });
+      presChans.push(ch);
+      ch.start();
+    }
+    paintBeacon();
+    setInterval(paintBeacon, 2000);
+  }).catch(() => { /* bad PRESENCE_PUB: the light stays off */ });
+}
+pe.form.addEventListener('submit', e => { e.preventDefault(); presenceStart(); });
+pe.stop.addEventListener('click', () => presenceStop(false));
+pe.setupBtn.addEventListener('click', presenceCreateKey);
+startBeaconWatch();
+
 /* ---------- events ---------- */
 el.form.addEventListener('submit', e => { e.preventDefault(); joinRoom(); });
 el.composer.addEventListener('submit', e => { e.preventDefault(); sendMessage(); el.input.focus(); });
@@ -1430,7 +1669,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { clearAlert(); tick(); }   // expiry is computed from sentAt, so catching up after a pause is exact
 });
 window.addEventListener('focus', () => { if (key) clearAlert(); });
-window.addEventListener('pagehide', e => { if (!e.persisted) wipeState(); });   // closing the tab still wipes; a page kept for back/forward does not
+window.addEventListener('pagehide', e => { if (!e.persisted) { presenceStop(true); wipeState(); } });   // closing the tab still wipes; a page kept for back/forward does not
 
 /* Keep the input reachable when a phone keyboard opens. */
 if (window.visualViewport) {
