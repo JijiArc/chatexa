@@ -59,7 +59,7 @@ Everything on a relay is an AES-GCM sealed envelope, so the operators and other 
 - The password never leaves the page. The relay topic and the key both derive from it; each guess costs 600,000 PBKDF2 rounds, so use four or more random words.
 - Public MQTT brokers let anyone list topic names, so other users of the broker can see your room id. Anyone who sees it can test password guesses offline, which makes a strong password matter even more.
 - Setup messages (hello, offer, answer) are AES-GCM sealed, so someone without the password cannot read them or swap in their own connection fingerprint.
-- Everything lives in memory. Locking, closing the tab, 5 minutes idle, or 2 minutes in the background wipes keys and messages.
+- Everything lives in memory. Pressing Lock or closing the tab wipes keys and messages. The session stays open, even in the background, until you press Lock. When a message arrives while the page is in the background, you get a browser notification (no message text in it) and a count in the tab title; allow notifications when the join form asks. Some mobile browsers only allow notifications from a service worker, so there the tab-title count is the fallback.
 - The content security policy permits connections only to the relay hosts (ntfy.sh, the MQTT brokers, and Turnix or Xirsys when you use them). No external scripts, fonts or images.
 
 ## Not covered

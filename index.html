@@ -1042,8 +1042,6 @@ function makeManualTransport(getKey) {
 }
 
 /* ===== UI. Everything lives in memory only. ===== */
-const IDLE_MS = 5 * 60 * 1000;
-const HIDDEN_WIPE_MS = 2 * 60 * 1000;
 const HEARTBEAT_EVERY = 10;
 const PRESENCE_MS = 25000;
 const PEER_FORGET_MS = 60000;
@@ -1062,8 +1060,8 @@ const el = {
 
 let key = null, roomId = null, tp = null, sessionId = null, roomNs = null, joining = false;
 let messages = [];
-let timer = null, hiddenTimer = null, hiddenAt = 0, tickCount = 0, offTicks = 0;
-let lastActivity = Date.now(), lastReplyAt = 0, noticeUntil = 0;
+let timer = null, tickCount = 0, offTicks = 0;
+let lastReplyAt = 0, noticeUntil = 0, unread = 0;
 const seen = new Map(), peerSeen = new Map(), nodes = new Map();
 
 /* Inside Claude, window.claude offers a built-in room. On GitHub Pages it does not exist and stays null. */
@@ -1129,6 +1127,7 @@ function doneJoining() { joining = false; el.joinBtn.disabled = false; }
 async function joinRoom() {
   if (joining) return;
   if (!el.pw.value.trim()) { setJoin('Enter the shared password to continue.', 'warn'); el.pw.focus(); return; }
+  askNotifyPermission();   // must run inside the click, before any await
   joining = true; el.joinBtn.disabled = true;
   setJoin('Connecting…');
   await capsReady;
@@ -1168,7 +1167,6 @@ async function joinRoom() {
   catch (e) { setJoin('This browser could not derive keys. Use a current browser over HTTPS.', 'bad'); doneJoining(); return; }
   resetPasswordField();
   key = k.key; roomId = k.roomId; sessionId = newId();
-  lastActivity = Date.now();
   const getKey = () => key, getSession = () => sessionId;
   tp = useMode === 'claude' ? makeClaudeTransport(roomNs, roomId)
     : useMode === 'manual' ? makeManualTransport(getKey)
@@ -1253,6 +1251,30 @@ async function sendMessage() {
   catch (e) { local.status = 'failed'; notice(describeSendError(e)); paint(Date.now()); }
 }
 
+/* ---------- notifications ---------- */
+/* Shown only while the page is in the background or unfocused. The text is never put in the notification:
+ * a lock screen should not reveal what was said. */
+const BASE_TITLE = document.title;
+function askNotifyPermission() {
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); }
+  catch (e) { /* older browsers: ignore */ }
+}
+function clearAlert() {
+  unread = 0;
+  document.title = BASE_TITLE;
+}
+function alertNewMessage() {
+  if (!document.hidden && document.hasFocus()) return;
+  unread++;
+  document.title = '(' + unread + ') New message · ' + BASE_TITLE;
+  try {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const n = new Notification('New message', { body: 'Open Secret Room Chat to read it before it vanishes.', tag: 'secret-room-msg', renotify: true });
+      n.onclick = () => { try { window.focus(); } catch (e) { /* ignore */ } n.close(); };
+    }
+  } catch (e) { /* some mobile browsers only allow notifications from a service worker: the title badge still works */ }
+}
+
 async function onChat(d) {
   const k = key;
   if (!k || !d || typeof d.iv !== 'string' || typeof d.ct !== 'string' || d.iv.length !== 16 || d.ct.length > 8192) return;
@@ -1275,6 +1297,7 @@ async function onChat(d) {
   }
   messages.push({ ...r, mine: false });
   paint(now);
+  alertNewMessage();
   transmit({ t: 'a', id: r.id, from: sessionId, sentAt: Date.now() }).catch(() => {});
 }
 
@@ -1345,7 +1368,6 @@ function updatePresence(now) {
 function tick() {
   if (!key) return;
   const now = Date.now();
-  if (now - lastActivity > IDLE_MS) { lock('idle'); return; }
   messages = messages.filter(m => !getState(m, now).expired);
   for (const [k, exp] of seen) if (now > exp) seen.delete(k);
   for (const [k, t] of peerSeen) if (now - t > PEER_FORGET_MS) peerSeen.delete(k);
@@ -1359,7 +1381,7 @@ function tick() {
 /* ---------- locking and wiping ---------- */
 function wipeState() {
   clearInterval(timer); timer = null;
-  clearTimeout(hiddenTimer); hiddenTimer = null; hiddenAt = 0;
+  clearAlert();
   if (tp) { const t = tp; tp = null; try { t.close(); } catch (e) { /* ignore */ } }
   key = null; roomId = null; sessionId = null;
   messages = [];
@@ -1381,8 +1403,6 @@ function lock(reason) {
   resetPasswordField();
   doneJoining();
   const notes = {
-    idle: 'Locked after 5 minutes without activity. Type the password to rejoin.',
-    hidden: 'Locked because the page was in the background for a while. Type the password to rejoin.',
     manual: 'Locked. Keys and messages were cleared from this page.'
   };
   setJoin(notes[reason] || '', '');
@@ -1421,23 +1441,13 @@ el.form.addEventListener('submit', e => { e.preventDefault(); joinRoom(); });
 el.composer.addEventListener('submit', e => { e.preventDefault(); sendMessage(); el.input.focus(); });
 el.lockBtn.addEventListener('click', () => lock('manual'));
 
-['pointerdown', 'pointermove', 'keydown', 'touchstart', 'focusin', 'input'].forEach(ev =>
-  document.addEventListener(ev, () => { lastActivity = Date.now(); }, { passive: true, capture: true }));
-
+/* The session stays open until the person presses Lock. Going to the background no longer locks it. */
 document.addEventListener('visibilitychange', () => {
   if (!key) return;
-  if (document.hidden) {
-    hiddenAt = Date.now();
-    clearTimeout(hiddenTimer);
-    hiddenTimer = setTimeout(() => lock('hidden'), HIDDEN_WIPE_MS);
-  } else {
-    clearTimeout(hiddenTimer); hiddenTimer = null;
-    if (hiddenAt && Date.now() - hiddenAt >= HIDDEN_WIPE_MS) { lock('hidden'); return; }
-    hiddenAt = 0;
-    tick();   // expiry is computed from sentAt, so catching up after a pause is exact
-  }
+  if (!document.hidden) { clearAlert(); tick(); }   // expiry is computed from sentAt, so catching up after a pause is exact
 });
-window.addEventListener('pagehide', () => { wipeState(); });
+window.addEventListener('focus', () => { if (key) clearAlert(); });
+window.addEventListener('pagehide', e => { if (!e.persisted) wipeState(); });   // closing the tab still wipes; a page kept for back/forward does not
 
 /* Keep the input reachable when a phone keyboard opens. */
 if (window.visualViewport) {
