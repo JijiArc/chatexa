@@ -480,7 +480,7 @@ function generatePassphrase(count) {
  * this file. The owner's page signs a small "I'm here" beat every 20 seconds and publishes it on an open MQTT topic. Every visitor's
  * page checks the signature against PRESENCE_PUB, so nobody can fake the light without the password, and the password never leaves
  * the owner's page. The beat carries no room id, no room password and no message content. */
-const PRESENCE_PUB = { x: 'YthkGqZxVmlmQZGlAg3c10JIt-kZq707h08JUwxon5I', y: '5id40rZVBKA-8u22K2rNABRkA6aFYwMzyxwCtbJ1dGA' }   // { x: '...', y: '...' } from the one-time setup box on the page. null keeps the light switched off.
+const PRESENCE_PUB = { x: 'WfpGIhL66AoByJnGXy-ND-499rncMFAnmglhOJ3VkeU', y: 'W1WKpgSvb72sIygfXQui0Ni6xtUoTCV_b-U41GOFr1o' };   // { x: '...', y: '...' } from the one-time setup box on the page. null keeps the light switched off.
 const PRESENCE_SALT = 'secret-room-chat/presence/v1';
 const PRESENCE_TOPIC = 'presence-v1';
 const PRESENCE_BEAT_MS = 20000;      // owner beats this often
