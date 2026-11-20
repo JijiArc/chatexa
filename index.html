@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex,nofollow">
 <link rel="icon" href="data:,">
 <!-- Relays: ntfy.sh plus the public MQTT brokers in MQTT_BROKERS below. If you change either, change connect-src to match (the tests check it). -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh wss://broker.emqx.io:8084 https://turnix.io https://global.xirsys.net; img-src data:; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://ntfy.sh wss://broker.emqx.io:8084 wss://broker.hivemq.com:8884 wss://mqtt.eclipseprojects.io https://turnix.io https://global.xirsys.net; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Secret Room Chat</title>
 <style>
 /* Flat dark theme: solid colours, thin borders, no gradients, glows or shadows. One narrow column shared by the lock screen and the chat.
@@ -580,7 +580,7 @@ const NTFY_SERVER = 'https://ntfy.sh';   // open public relay, no account; self-
 /* Open public MQTT brokers, reached over secure WebSocket: no account, no setup. Setup and relay traffic goes to ntfy.sh and to
  * every broker listed here at once, so one relay being slow or down does not stop the chat. Everything on them is an AES-GCM
  * sealed envelope. To add a broker, add its wss:// URL here and its host:port to connect-src in the CSP meta tag. */
-const MQTT_BROKERS = ['wss://broker.emqx.io:8084/mqtt'];
+const MQTT_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt', 'wss://mqtt.eclipseprojects.io:443/mqtt'];
 const STUN_URLS = ['stun:stun.cloudflare.com:3478'];
 /* Optional TURN server for networks that block direct links, for example your own coturn:
  *   [{ urls: 'turn:turn.example.org:3478', username: 'user', credential: 'pass' }]
@@ -1564,6 +1564,12 @@ function paintBeacon() {
   pe.dot.dataset.state = state;
   pe.beacon.dataset.state = state;
 }
+function presenceRelayNote() {
+  const up = presChans.filter(c => c.up()).length;
+  if (!presSignKey) return;
+  if (up > 0) setPresenceStatus('You are showing as online (' + up + ' of ' + presChans.length + ' relays connected). Keep this page open; it is shown to everyone who opens it.', '');
+  else setPresenceStatus('Connecting to the relays… If this stays here, this network may be blocking WebSocket connections (ports 8084, 8884, 443). Try mobile data.', 'warn');
+}
 function presencePost(msg) {
   for (const ch of presChans) { try { ch.post(msg).catch(() => {}); } catch (e) { /* relay not ready */ } }
 }
@@ -1612,7 +1618,7 @@ async function presenceStart() {
   try { presSignKey = await presenceSignKey(k); }
   catch (e) { setPresenceStatus('This browser could not use the key.', 'bad'); pe.btn.disabled = false; return; }
   pe.btn.disabled = false; pe.btn.hidden = true; pe.pw.hidden = true; pe.stop.hidden = false;
-  setPresenceStatus("You are showing as online. Keep this page open; it is shown to everyone who opens it.", '');
+  presenceRelayNote();
   await presenceBeat();
   presTimer = setInterval(presenceBeat, PRESENCE_BEAT_MS);
 }
@@ -1643,8 +1649,12 @@ function startBeaconWatch() {
     for (const url of MQTT_BROKERS) {
       const ch = makeMqttChannel(url, PRESENCE_TOPIC, {
         onEnv: onPresenceEnv,
-        onState: up => { if (up) { try { ch.post({ q: 1 }).catch(() => {}); } catch (e) { /* not ready */ } } },   // ask the owner for a beat right away
-        onFail: () => {}
+        onState: up => {
+          if (up) { try { ch.post({ q: 1 }).catch(() => {}); } catch (e) { /* not ready */ } }   // ask the owner for a beat right away
+          if (up && presSignKey) presenceBeat();   // owner: a relay just came up, so send a beat now instead of waiting up to 20 s
+          presenceRelayNote();
+        },
+        onFail: () => presenceRelayNote()
       });
       presChans.push(ch);
       ch.start();
