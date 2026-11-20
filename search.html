@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://api.archivegenocide.com https://api.allorigins.win https://api.codetabs.com; img-src https: data:; base-uri 'none'; form-action 'none'">
   <meta name="theme-color" content="#0e0e10">
   <meta name="description" content="Search the Archive Genocide public documentation archive by caption, date, source, media type and location.">
@@ -123,7 +124,7 @@
     return safeText(value).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
   }
   function safeHttpUrl(value) {
-    try { const u = new URL(value); return (u.protocol === "https:" || u.protocol === "http:") ? u.href : ""; }
+    try { const u = new URL(value); return u.protocol === "https:" ? u.href : ""; }   // https only: API and proxy replies are untrusted
     catch { return ""; }
   }
   function formatDate(value) {
@@ -341,7 +342,13 @@
     const a = document.createElement("a"); a.href=url; a.download=name; a.click();
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
-  function csvCell(value) { const s = value == null ? "" : String(value); return `"${s.replace(/"/g,'""')}"`; }
+  /* Spreadsheet apps run cells that start with = + - @ (or tab / CR) as formulas, and the cells come from untrusted API replies.
+     Prefix those with an apostrophe so they stay text; plain numbers such as -31.52 are left alone. */
+  function csvCell(value) {
+    let s = value == null ? "" : String(value);
+    if (/^[=+\-@\t\r]/.test(s) && !/^-?\d+(\.\d+)?$/.test(s)) s = "'" + s;
+    return `"${s.replace(/"/g,'""')}"`;
+  }
   function exportData(format) {
     if (!state.results.length) return;
     if (format === "json") downloadFile("memento-results.json",JSON.stringify({exported_at:new Date().toISOString(),source:"Archive Genocide",results:state.results},null,2),"application/json");

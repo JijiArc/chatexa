@@ -116,6 +116,38 @@ await ok('static-hosting rules: no external scripts, CSP present, no wildcards',
   }
   assert.ok(connectOf(html).includes('https://ntfy.sh'));
 });
+
+await ok('security: every page that makes network requests sends no Referer', () => {
+  for (const [name, src] of [['index', html], ['vault', vaultHtml], ['search', searchHtml], ['group', groupHtml]]) {
+    assert.match(src, /<meta name="referrer" content="no-referrer">/, name + ': missing no-referrer policy');
+  }
+});
+
+await ok('security: search page accepts only https links and keeps exported CSV cells from running as formulas', () => {
+  const grab = name => {
+    const m = searchHtml.match(new RegExp('function ' + name + '\\(value\\) \\{[\\s\\S]*?\\n  \\}'));
+    assert.ok(m, name + ' not found in search.html');
+    return m[0];
+  };
+  const { csvCell, safeHttpUrl } = new Function(grab('csvCell') + '\n' + grab('safeHttpUrl') + '\nreturn { csvCell, safeHttpUrl };')();
+  assert.equal(safeHttpUrl('https://example.org/a'), 'https://example.org/a');
+  assert.equal(safeHttpUrl('http://example.org/a'), '');
+  assert.equal(safeHttpUrl('javascript:alert(1)'), '');
+  assert.equal(safeHttpUrl('data:text/html,x'), '');
+  for (const bad of ['=HYPERLINK("http://x","y")', '+1+1', '-2+3', '@SUM(A1)', '\tcmd', '\rcmd']) {
+    assert.ok(csvCell(bad).startsWith('"\''), 'formula not neutralised: ' + JSON.stringify(bad));
+  }
+  assert.equal(csvCell('-31.5234'), '"-31.5234"');   // coordinates stay numbers
+  assert.equal(csvCell(31.5), '"31.5"');
+  assert.equal(csvCell('say "hi"'), '"say ""hi"""');
+  assert.equal(csvCell(null), '""');
+});
+
+await ok('security: the workflow runs with read-only permissions and SHA-pinned actions', () => {
+  const wf = readFileSync(new URL(root + '.github/workflows/test.yml', import.meta.url), 'utf8');
+  assert.match(wf, /^permissions:\s*\n\s+contents: read/m, 'workflow needs a read-only permissions block');
+  for (const m of wf.matchAll(/uses:\s*(\S+)@(\S+)/g)) assert.match(m[2], /^[0-9a-f]{40}$/, m[1] + ' is not pinned to a commit SHA');
+});
 await ok('every MQTT broker is wss and allowed by the CSP', () => {
   const list = html.match(/const MQTT_BROKERS = \[([^\]]*)\]/);
   assert.ok(list, 'MQTT_BROKERS constant missing');
