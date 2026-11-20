@@ -484,4 +484,57 @@ await ok('presence: the page only shows the light when PRESENCE_PUB is set, and 
   assert.ok(!/PRESENCE_PUB\s*=\s*\{[^}]*\bd\b\s*:/.test(html), 'never put the private scalar d in the page');
 });
 
+/* ── emoji keyboard ── */
+const emojiBlock = src => {
+  const i = src.lastIndexOf('<script>');
+  assert.ok(i >= 0 && /EMOJI_DATA/.test(src.slice(i)), 'emoji script block not found');
+  return src.slice(i, src.indexOf('</script>', i));
+};
+await ok('emoji keyboard: both chat pages ship the same local picker, with a button next to Send', () => {
+  assert.equal(emojiBlock(html), emojiBlock(groupHtml).replace("'input'", "'msgInput'").replace("'sendForm'", "'composer'"), 'index and group pickers drifted apart');
+  for (const [name, src] of [['index', html], ['group', groupHtml]]) assert.match(src, /id="emojiBtn"[^>]*aria-label="Emoji keyboard"/, name + ': emoji button missing');
+});
+await ok('emoji keyboard: data is large enough, names are unique shortcodes, and no emoji repeats', () => {
+  const src = emojiBlock(html);
+  const m = src.match(/const EMOJI_DATA = (\[[\s\S]*?\n  \]);/);
+  assert.ok(m, 'EMOJI_DATA not found');
+  const data = new Function('return ' + m[1])();
+  const names = new Set(), glyphs = new Set();
+  let count = 0;
+  for (const [cat, icon, list] of data) {
+    assert.ok(cat && icon, 'category needs a name and an icon');
+    for (const entry of list) {
+      const [e, ...words] = entry.split(' ');
+      assert.ok(e && /[^\x00-\x7f]/.test(e), 'entry must start with an emoji: ' + entry);
+      assert.match(words[0], /^[a-z0-9_]+$/, 'bad shortcode: ' + entry);
+      assert.ok(!names.has(words[0]), 'duplicate shortcode ' + words[0]); names.add(words[0]);
+      assert.ok(!glyphs.has(e), 'duplicate emoji ' + e); glyphs.add(e);
+      count++;
+    }
+  }
+  assert.ok(count >= 300, 'only ' + count + ' emoji');
+});
+await ok('emoji keyboard: it is fully local (no network code, no emoji service, CSP unchanged)', () => {
+  for (const [name, src] of [['index', html], ['group', groupHtml]]) {
+    const code = emojiBlock(src);
+    assert.ok(!/fetch\(|XMLHttpRequest|WebSocket|sendBeacon|importScripts|https?:\/\//.test(code), name + ': emoji code must not touch the network');
+    assert.ok(!/localStorage|sessionStorage|indexedDB|document\.cookie/.test(code), name + ': emoji code must not store anything');
+    assert.ok(!/parseapi/i.test(src), name + ': no third-party emoji API');
+    assert.ok(!/innerHTML/.test(code), name + ': build the picker with DOM calls, not innerHTML');
+  }
+});
+await ok('emoji keyboard: :shortcode: expansion only fires for known names', () => {
+  const fn = emojiBlock(html).match(/function emojiShortcodeAt\([^)]*\) \{[\s\S]*?\n  \}/);
+  assert.ok(fn, 'emojiShortcodeAt not found');
+  const emojiShortcodeAt = new Function(fn[0] + '\nreturn emojiShortcodeAt;')();
+  const names = { rocket: '🚀', cat: '🐱' };
+  assert.deepEqual(emojiShortcodeAt('go :rocket:', names), { start: 3, emoji: '🚀' });
+  assert.deepEqual(emojiShortcodeAt(':cat:', names), { start: 0, emoji: '🐱' });
+  assert.equal(emojiShortcodeAt('time 10:30:', names), null);
+  assert.equal(emojiShortcodeAt(':unknown:', names), null);
+  assert.equal(emojiShortcodeAt(':constructor:', names), null);
+  assert.equal(emojiShortcodeAt(':toString:', names), null);
+  assert.equal(emojiShortcodeAt('no colon at the end :rocket', names), null);
+});
+
 console.log(`\n${n} checks passed`);

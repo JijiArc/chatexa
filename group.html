@@ -71,9 +71,23 @@
   .msg .who { font-size: 12px; color: var(--moon); }
   .msg .text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
   .msg .left { font-size: 11px; color: var(--muted); align-self: flex-end; }
-  .send { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 10px; align-items: stretch; }
+  .send { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; margin-top: 10px; align-items: stretch; }
   .send textarea { resize: none; }
-  @media (max-width: 520px) { .send { grid-template-columns: 1fr auto; } .send textarea { grid-column: 1 / -1; } .card { padding: 16px 14px; } }
+  @media (max-width: 520px) { .send { grid-template-columns: 1fr auto auto; } .send textarea { grid-column: 1 / -1; } .card { padding: 16px 14px; } }
+
+/* emoji keyboard */
+#sendForm { position: relative; }
+.emoji-btn { font-size: 22px; line-height: 1; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.emoji-pop { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: min(340px, 100%); display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+.emoji-pop[hidden] { display: none; }
+.emoji-search { padding: 8px 10px; font-size: 16px; }
+.emoji-tabs { display: flex; gap: 2px; overflow-x: auto; }
+.emoji-tab { flex: none; min-width: 38px; min-height: 36px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; font-size: 18px; line-height: 1; opacity: .65; cursor: pointer; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.emoji-tab[aria-pressed="true"] { background: var(--line); opacity: 1; }
+.emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 2px; max-height: 210px; overflow-y: auto; }
+.emoji-key { min-height: 38px; padding: 0; border: 0; border-radius: 6px; background: transparent; font-size: 22px; line-height: 1; cursor: pointer; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.emoji-key:hover, .emoji-key:focus-visible { background: var(--line); }
+.emoji-none { grid-column: 1 / -1; margin: 10px 6px; font-size: 13px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -140,6 +154,7 @@
           <option value="60" selected>60 s</option>
           <option value="75">75 s</option>
         </select>
+        <button class="ghost emoji-btn" id="emojiBtn" type="button" aria-label="Emoji keyboard" aria-haspopup="dialog" aria-expanded="false">&#128578;</button>
         <button class="primary" type="submit">Send</button>
       </form>
     </section>
@@ -1169,6 +1184,196 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden && key) hiddenTimer = setTimeout(() => lock('hidden'), HIDDEN_WIPE_MS);
 });
 window.addEventListener('pagehide', () => { if (key) wipeState(); });
+</script>
+<script>
+(function () {
+  'use strict';
+  /* Built-in emoji keyboard. Everything is local: no emoji service, no network request, no API key, and nothing stored.
+     Each entry is "emoji name extra search words"; the first word is also the :shortcode: you can type. The recent list lives in memory only. */
+  const EMOJI_DATA = [
+    ['Smileys', '🙂', [
+      '😀 grinning happy', '😃 smiley happy', '😄 smile happy', '😁 beaming grin', '😆 laughing lol', '😅 sweat_smile phew',
+      '😂 joy lol tears', '🤣 rofl lol rolling', '🙂 slight_smile', '🙃 upside_down silly', '😉 wink', '😊 blush happy',
+      '😇 innocent angel', '🥰 smiling_hearts love', '😍 heart_eyes love', '🤩 star_struck wow', '😘 kiss blow', '😗 kissing',
+      '😋 yum tasty', '😛 tongue', '😜 wink_tongue silly', '🤪 zany crazy', '🤗 hugging hug', '🤭 oops giggle',
+      '🤫 shush quiet secret', '🤔 thinking hmm', '🤐 zipper_mouth secret', '😐 neutral', '😑 expressionless', '😶 no_mouth speechless',
+      '😏 smirk', '😒 unamused', '🙄 eye_roll', '😬 grimace awkward', '😌 relieved calm', '😔 pensive sad',
+      '😪 sleepy', '😴 sleeping zzz', '😷 mask sick', '🤒 thermometer sick', '🤕 bandage hurt', '🤢 nauseated sick',
+      '🥵 hot_face', '🥶 cold_face freezing', '😵 dizzy_face', '🤯 mind_blown', '🥳 partying celebrate', '😎 cool sunglasses',
+      '🤓 nerd', '🥺 pleading please', '😢 cry sad', '😭 sob crying', '😤 huff', '😠 angry',
+      '😡 rage mad', '😱 scream shocked', '😨 fearful scared', '😰 anxious worried', '😓 sweat', '😞 disappointed',
+      '😩 weary', '😫 tired', '🥱 yawn', '😳 flushed embarrassed', '🤤 drooling', '😈 devil',
+      '👻 ghost', '💀 skull', '🤖 robot', '😺 cat_smile', '🙈 see_no_evil', '🙉 hear_no_evil',
+      '🙊 speak_no_evil',
+    ]],
+    ['People', '👋', [
+      '👍 thumbs_up yes good', '👎 thumbs_down no bad', '👏 clap', '🙌 raised_hands', '🙏 pray thanks please', '🤝 handshake deal',
+      '👋 wave hello bye', '✌️ victory peace', '🤞 crossed_fingers luck', '🤟 love_you', '🤘 rock_on', '👌 ok_hand perfect',
+      '👈 point_left', '👉 point_right', '👆 point_up', '👇 point_down', '☝️ index_up', '✋ raised_hand stop',
+      '💪 muscle strong', '✍️ writing', '🤳 selfie', '💅 nail_polish', '👀 eyes look', '👂 ear',
+      '👄 mouth', '🧠 brain', '👶 baby', '👧 girl', '👦 boy', '👩 woman',
+      '👨 man', '🧑 person', '👵 old_woman', '👴 old_man', '💃 dancer', '🕺 man_dancing',
+      '🏃 running', '🚶 walking', '🤷 shrug', '🤦 facepalm', '🙋 raising_hand', '🙇 bow',
+      '🧘 meditating', '👑 crown', '👓 glasses',
+    ]],
+    ['Hearts and symbols', '❤️', [
+      '❤️ red_heart love', '🧡 orange_heart', '💛 yellow_heart', '💚 green_heart', '💙 blue_heart', '💜 purple_heart',
+      '🖤 black_heart', '🤍 white_heart', '🤎 brown_heart', '💔 broken_heart', '❣️ heart_exclamation', '💕 two_hearts',
+      '💞 revolving_hearts', '💓 beating_heart', '💗 growing_heart', '💖 sparkling_heart', '💘 heart_arrow', '💝 heart_gift',
+      '✨ sparkles', '⭐ star', '🌟 glowing_star', '💫 dizzy_star', '🔥 fire hot lit', '💯 hundred perfect',
+      '✅ check_mark done', '❌ cross_mark no', '❗ exclamation', '❓ question', '⚠️ warning', '🚫 prohibited no',
+      '💥 boom', '💤 zzz sleep', '💬 speech_bubble chat', '💭 thought_bubble', '🎉 tada party celebrate', '➕ plus',
+      '➖ minus', '➡️ arrow_right', '⬅️ arrow_left', '⬆️ arrow_up', '⬇️ arrow_down', '🔄 refresh',
+      '🔔 bell', '🔒 locked', '🔓 unlocked', '🔑 key',
+    ]],
+    ['Animals', '🐱', [
+      '🐶 dog', '🐱 cat', '🐭 mouse', '🐹 hamster', '🐰 rabbit', '🦊 fox',
+      '🐻 bear', '🐼 panda', '🐨 koala', '🐯 tiger', '🦁 lion', '🐮 cow',
+      '🐷 pig', '🐸 frog', '🐵 monkey', '🐔 chicken', '🐧 penguin', '🐦 bird',
+      '🐤 chick', '🦆 duck', '🦉 owl', '🦜 parrot', '🦋 butterfly', '🐝 bee',
+      '🐞 ladybug', '🐢 turtle', '🐍 snake', '🐙 octopus', '🐠 fish', '🐬 dolphin',
+      '🐳 whale', '🦈 shark', '🐴 horse', '🦄 unicorn', '🐘 elephant', '🦒 giraffe',
+      '🐑 sheep', '🦔 hedgehog', '🐾 paw_prints',
+    ]],
+    ['Nature', '🌸', [
+      '🌸 cherry_blossom', '🌹 rose', '🌻 sunflower', '🌷 tulip', '🌼 blossom', '🌿 herb',
+      '🍀 clover luck', '🌱 seedling', '🌵 cactus', '🌴 palm_tree', '🌲 evergreen', '🌳 tree',
+      '🍁 maple_leaf', '🍂 fallen_leaf', '🍄 mushroom', '🌙 moon', '🌕 full_moon', '☀️ sun',
+      '☁️ cloud', '🌧️ rain', '⚡ lightning', '❄️ snowflake', '☔ umbrella_rain', '🌈 rainbow',
+      '🌊 water_wave', '🌍 earth', '💧 droplet',
+    ]],
+    ['Food and drink', '🍕', [
+      '🍎 apple', '🍊 orange', '🍋 lemon', '🍌 banana', '🍉 watermelon', '🍇 grapes',
+      '🍓 strawberry', '🍑 peach', '🍒 cherries', '🍍 pineapple', '🥭 mango', '🥑 avocado',
+      '🍅 tomato', '🥕 carrot', '🌽 corn', '🍞 bread', '🥐 croissant', '🧀 cheese',
+      '🍕 pizza', '🍔 burger', '🍟 fries', '🌭 hot_dog', '🌮 taco', '🍣 sushi',
+      '🍜 ramen', '🍙 rice_ball', '🍡 dango', '🍱 bento', '🍰 cake', '🎂 birthday_cake',
+      '🍫 chocolate', '🍪 cookie', '🍩 donut', '🍦 ice_cream', '🍿 popcorn', '☕ coffee',
+      '🍵 tea', '🧋 bubble_tea', '🍺 beer', '🍷 wine', '🥤 soda', '🍯 honey',
+      '🥗 salad', '🍳 fried_egg',
+    ]],
+    ['Activities and objects', '🎮', [
+      '⚽ soccer', '🏀 basketball', '🎾 tennis', '🎮 video_game', '🎲 dice', '🧩 puzzle',
+      '🎯 target', '🎧 headphones', '🎵 music_note', '🎶 music_notes', '🎤 microphone', '🎸 guitar',
+      '🎹 piano', '🎬 clapper', '📷 camera', '🎨 art', '📚 books', '📖 book',
+      '✏️ pencil', '📝 memo', '💻 laptop', '📱 phone', '💡 light_bulb', '⏰ alarm_clock',
+      '⌛ hourglass', '🔋 battery', '🔌 plug', '📎 paperclip', '📌 pushpin', '🎁 gift',
+      '🎈 balloon', '🎊 confetti', '🏆 trophy', '🥇 gold_medal', '💰 money_bag', '💎 gem',
+      '🔭 telescope', '🧪 test_tube', '🔧 wrench', '⚙️ gear', '🧲 magnet', '📦 package',
+      '🎀 ribbon',
+    ]],
+    ['Travel and places', '🚀', [
+      '🚀 rocket', '🛸 ufo', '✈️ airplane', '🚗 car', '🚕 taxi', '🚌 bus',
+      '🚆 train', '🚲 bike', '🛵 scooter', '⛵ sailboat', '🚢 ship', '🏠 house',
+      '🏡 house_garden', '🏢 office', '🏖️ beach', '🏝️ island', '⛺ tent', '🌅 sunrise',
+      '🌄 sunrise_mountains', '🌃 night_city', '🌉 bridge_night', '🗼 tokyo_tower', '⛩️ torii_gate', '🏯 castle',
+      '🗺️ world_map', '🧭 compass', '🎌 crossed_flags', '🎡 ferris_wheel', '🎢 roller_coaster',
+    ]],
+  ];
+  function emojiShortcodeAt(before, byName) {
+    const m = /:([a-z0-9_]{2,24}):$/.exec(before);
+    if (!m || !Object.prototype.hasOwnProperty.call(byName, m[1])) return null;
+    return { start: m.index, emoji: byName[m[1]] };
+  }
+  const cats = EMOJI_DATA.map(([name, icon, list]) => ({ name, icon, items: list.map(s => {
+    const i = s.indexOf(' ');
+    return { e: s.slice(0, i), words: s.slice(i + 1).split(' ') };
+  }) }));
+  const byName = {}, byEmoji = {};
+  for (const c of cats) for (const it of c.items) { byName[it.words[0]] = it.e; byEmoji[it.e] = it; }
+
+  const input = document.getElementById('input'), btn = document.getElementById('emojiBtn'), form = document.getElementById('sendForm');
+  if (!input || !btn || !form) return;
+  const recent = [];
+  let tab = cats[0].name;
+
+  const pop = document.createElement('div');
+  pop.className = 'emoji-pop'; pop.id = 'emojiPop'; pop.hidden = true;
+  pop.setAttribute('role', 'dialog'); pop.setAttribute('aria-label', 'Emoji keyboard');
+  const search = document.createElement('input');
+  search.type = 'search'; search.className = 'input emoji-search'; search.placeholder = 'Search emoji';
+  search.autocomplete = 'off'; search.spellcheck = false; search.setAttribute('aria-label', 'Search emoji');
+  const tabs = document.createElement('div'); tabs.className = 'emoji-tabs';
+  const grid = document.createElement('div'); grid.className = 'emoji-grid';
+  pop.append(search, tabs, grid);
+  form.append(pop);
+  btn.setAttribute('aria-controls', 'emojiPop');
+
+  function show(items) {
+    grid.replaceChildren();
+    if (!items.length) {
+      const p = document.createElement('p'); p.className = 'emoji-none'; p.textContent = 'No emoji found';
+      grid.append(p); return;
+    }
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'emoji-key'; b.textContent = it.e; b.dataset.e = it.e;
+      b.title = it.words[0].replace(/_/g, ' '); b.setAttribute('aria-label', b.title);
+      grid.append(b);
+    }
+  }
+  function tabItems(name) { return name === 'Recent' ? recent : (cats.find(c => c.name === name) || cats[0]).items; }
+  function showTab(name) {
+    tab = name;
+    for (const b of tabs.children) b.setAttribute('aria-pressed', String(b.title === name));
+    show(tabItems(name)); grid.scrollTop = 0;
+  }
+  function buildTabs() {
+    tabs.replaceChildren();
+    const list = recent.length ? [{ name: 'Recent', icon: '🕘' }, ...cats] : cats;
+    for (const c of list) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'emoji-tab'; b.textContent = c.icon; b.title = c.name;
+      b.setAttribute('aria-label', c.name); b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', () => { search.value = ''; showTab(c.name); });
+      tabs.append(b);
+    }
+  }
+  function setOpen(open) {
+    pop.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    if (!open) return;
+    search.value = '';
+    buildTabs();
+    showTab(recent.length ? 'Recent' : (tab === 'Recent' ? cats[0].name : tab));
+  }
+  function insert(e) {
+    const max = input.maxLength > 0 ? input.maxLength : Infinity;
+    const s = input.selectionStart == null ? input.value.length : input.selectionStart;
+    const en = input.selectionEnd == null ? s : input.selectionEnd;
+    if (input.value.length - (en - s) + e.length > max) return;   // never push past the message limit
+    input.setRangeText(e, s, en, 'end');
+    const it = byEmoji[e];
+    if (it) { const k = recent.indexOf(it); if (k >= 0) recent.splice(k, 1); recent.unshift(it); if (recent.length > 18) recent.length = 18; }
+    input.focus({ preventScroll: true });
+  }
+
+  btn.addEventListener('mousedown', e => e.preventDefault());           // keep the caret (and a phone keyboard) in the message box
+  btn.addEventListener('click', () => setOpen(pop.hidden));
+  pop.addEventListener('mousedown', e => { if (e.target !== search) e.preventDefault(); });
+  grid.addEventListener('click', e => { const b = e.target.closest('.emoji-key'); if (b) insert(b.dataset.e); });
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase().replace(/^:|:$/g, '');
+    if (!q) { showTab(tab); return; }
+    const hits = [];
+    for (const c of cats) for (const it of c.items) if (it.words.some(w => w.includes(q))) hits.push(it);
+    show(hits.slice(0, 96));
+  });
+  document.addEventListener('pointerdown', e => { if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) setOpen(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop.hidden) { setOpen(false); input.focus({ preventScroll: true }); } });
+  form.addEventListener('submit', () => setOpen(false));
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) setOpen(false); });
+
+  /* Typing :rocket: turns into the emoji as soon as the closing colon is typed. */
+  input.addEventListener('input', e => {
+    if (e.isComposing) return;
+    const pos = input.selectionStart;
+    if (pos == null || input.selectionEnd !== pos) return;
+    const from = Math.max(0, pos - 26);
+    const hit = emojiShortcodeAt(input.value.slice(from, pos), byName);
+    if (hit) input.setRangeText(hit.emoji, from + hit.start, pos, 'end');
+  });
+})();
 </script>
 </body>
 </html>
