@@ -25,6 +25,10 @@ Open the same file as an artifact. When Claude's room is available, "Automatic" 
 
 `group.html` is a room for up to 15 people sharing one password (it is a different room from the one-to-one chat even with the same password). Members find each other through the same open relays, then every pair opens a direct WebRTC link, so each member holds up to 14 links. Messages go straight to every connected member; anyone not linked yet is reached through the encrypted relay and shown once. TURN details (Turnix, Xirsys) work the same way as in the one-to-one chat. The 15 limit is enforced by the pages themselves: the first 15 members by join time are admitted, and anyone else sees "not admitted". That stops honest clients, not someone who already holds the password and runs their own code. All members can see each other's IP address. Keep the password to people you trust.
 
+## Emoji keyboard
+
+Both chat pages have a 🙂 button next to Send that opens a built-in emoji keyboard: 8 categories, a search box, and a recent list. You can also type a shortcode such as `:rocket:` and it turns into the emoji when you type the closing colon. It is part of the page itself, so there is no emoji service, no API key, no extra network request, and nothing is saved (the recent list lives in memory and is gone when you reload). A hosted emoji API is deliberately not used: a key in a static page is public, and every emoji you looked up would be visible to that service.
+
 ## Online light ("i'm here baby")
 
 The one-to-one page can show a green light on its lock screen, before anyone types a password, while the owner is online.
