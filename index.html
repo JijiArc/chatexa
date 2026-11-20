@@ -1568,7 +1568,7 @@ function presenceRelayNote() {
   const up = presChans.filter(c => c.up()).length;
   if (!presSignKey) return;
   if (up > 0) setPresenceStatus('You are showing as online (' + up + ' of ' + presChans.length + ' relays connected). Keep this page open; it is shown to everyone who opens it.', '');
-  else setPresenceStatus('Connecting to the relays… If this stays here, this network may be blocking WebSocket connections (ports 8084, 8884, 443). Try mobile data.', 'warn');
+  else setPresenceStatus('Connecting to the relays… If this stays here, this network may be blocking all relays. Try mobile data.', 'warn');
 }
 function presencePost(msg) {
   for (const ch of presChans) { try { ch.post(msg).catch(() => {}); } catch (e) { /* relay not ready */ } }
@@ -1646,8 +1646,12 @@ function startBeaconWatch() {
     presVerify = vk;
     presWatchAt = Date.now();
     pe.beacon.hidden = false; pe.box.hidden = false;
-    for (const url of MQTT_BROKERS) {
-      const ch = makeMqttChannel(url, PRESENCE_TOPIC, {
+    /* Every MQTT broker plus ntfy.sh. ntfy runs over plain HTTPS (port 443), so it still works on networks that block the
+     * WebSocket brokers. Duplicate beats arriving on several relays are ignored by presenceAccept (same timestamp). */
+    const makers = MQTT_BROKERS.map(url => cb => makeMqttChannel(url, PRESENCE_TOPIC, cb));
+    makers.push(cb => makeNtfyChannel(PRESENCE_TOPIC, cb));
+    for (const make of makers) {
+      const ch = make({
         onEnv: onPresenceEnv,
         onState: up => {
           if (up) { try { ch.post({ q: 1 }).catch(() => {}); } catch (e) { /* not ready */ } }   // ask the owner for a beat right away
