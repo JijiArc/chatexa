@@ -114,6 +114,12 @@ select.input { padding: 11px 12px; }
   .app { padding-block: 6px; }
   .chat { gap: 6px; }
 }
+
+.emoji-btn { flex: none; width: 44px; min-height: 44px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: inherit; font-size: 20px; cursor: pointer; }
+.emoji-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); gap: 2px; max-height: 160px; overflow-y: auto; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.emoji-panel[hidden] { display: none; }
+.emoji-panel button { min-height: 38px; border: 0; border-radius: 6px; background: transparent; font-size: 22px; cursor: pointer; padding: 0; }
+.emoji-panel button:hover, .emoji-panel button:focus-visible { background: var(--line); outline: none; }
 </style>
 </head>
 <body>
@@ -244,7 +250,9 @@ select.input { padding: 11px 12px; }
           <option value="75">75 seconds</option>
         </select>
       </div>
+      <div class="emoji-panel" id="emojiPanel" role="group" aria-label="Emoji" hidden></div>
       <div class="send-row">
+        <button class="emoji-btn" id="emojiBtn" type="button" aria-label="Emoji" aria-expanded="false" aria-controls="emojiPanel">&#128578;</button>
         <input class="input" id="msgInput" type="text" dir="auto" maxlength="1000" autocomplete="off" aria-label="Message" placeholder="Write a message">
         <button class="send" id="sendBtn" type="submit" aria-label="Send message">&#10148;</button>
       </div>
@@ -1695,6 +1703,31 @@ if (window.visualViewport) {
     el.log.scrollTop = el.log.scrollHeight;
   });
 }
+
+/* ---------- emoji picker ---------- */
+const EMOJIS = ["😀", "😁", "😂", "🤣", "😊", "😍", "🥰", "😘", "😉", "😎", "🤔", "😅", "😭", "😢", "😡", "🥺", "😴", "🤗", "🙄", "😇", "🥳", "😋", "😜", "🤭", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💖", "💗", "💔", "🔥", "✨", "⭐", "🌙", "🌸", "🌹", "🌿", "☕", "🍵", "🍰", "🐱", "🐶", "🦜", "👍", "👎", "👏", "🙏", "💪", "👋", "🤝", "🙌", "🎉", "🎁", "💬", "👀", "✅", "❌", "❓", "💯"];
+(function () {
+  const input = document.getElementById('msgInput'), btn = document.getElementById('emojiBtn'), panel = document.getElementById('emojiPanel');
+  if (!input || !btn || !panel) return;
+  EMOJIS.forEach(function (ch) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = ch; b.setAttribute('aria-label', 'Insert ' + ch);
+    b.addEventListener('click', function () {
+      const s = input.selectionStart == null ? input.value.length : input.selectionStart;
+      const e = input.selectionEnd == null ? s : input.selectionEnd;
+      const next = input.value.slice(0, s) + ch + input.value.slice(e);
+      if (input.maxLength > 0 && next.length > input.maxLength) return;
+      input.value = next;
+      const pos = s + ch.length;
+      input.focus(); try { input.setSelectionRange(pos, pos); } catch (x) { /* ignore */ }
+    });
+    panel.appendChild(b);
+  });
+  btn.addEventListener('click', function () {
+    panel.hidden = !panel.hidden;
+    btn.setAttribute('aria-expanded', String(!panel.hidden));
+  });
+})();
 </script>
 </body>
 </html>
